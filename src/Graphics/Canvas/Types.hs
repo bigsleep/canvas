@@ -1,5 +1,15 @@
 module Graphics.Canvas.Types
-    (
+    ( Coord
+    , Color
+    , Shape(..)
+    , Path(..)
+    , ShapeStyle(..)
+    , LineStyle(..)
+    , FillStyle(..)
+    , Transform(..)
+    , Transforms
+    , Drawing(..)
+    , Canvas(..)
     ) where
 
 import qualified Data.Color (Color)
