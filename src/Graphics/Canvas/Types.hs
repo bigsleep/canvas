@@ -3,11 +3,12 @@ module Graphics.Canvas.Types
     ) where
 
 import qualified Data.Color (Color)
-import qualified Linear (V2(..))
+import Data.Word (Word8)
+import Linear (V2, M22)
 
 type Coord = V2 Double
 
-type Color = Data.Color.Color
+type Color = Data.Color.Color Word8
 
 data Shape
     = Triangle !Coord !Coord !Coord
@@ -23,25 +24,41 @@ data Path
     | Arc !Coord !Double !Double !Double
     deriving (Show, Read, Eq)
 
-type ShapeStyle = ShapeStyle
-    { lineStyle :: LineStyle
-    , fillStyle :: FillStyle
+data ShapeStyle = ShapeStyle
+    { shapeStyleLineStyle :: !LineStyle
+    , shapeStyleFillStyle :: !FillStyle
     }
     deriving (Show, Read, Eq)
 
-type LineStyle = LineStyle
-    { color : Color
-    , width : Double
+data LineStyle = LineStyle
+    { lineStyleColor :: !Color
+    , lineStyleWidth :: !Double
     }
     deriving (Show, Read, Eq)
 
-type FillStyle =
-    { color :: Color
+data FillStyle = FillStyle
+    { fillStyleColor :: !Color
     }
     deriving (Show, Read, Eq)
 
-type Drawing
-    = ShapeDrawing !ShapeStyle !Transform !Shape
-    | PathDrawing !LineStyle !Transform !Path
+data Transform
+    = Rotate !Double !Coord
+    | Translate !Coord
+    | Scale !Double
+    | Affine !(M22 Double)
     deriving (Show, Read, Eq)
 
+type Transforms = [Transform]
+
+data Drawing
+    = ShapeDrawing !ShapeStyle !Transforms !Shape
+    | PathDrawing !LineStyle !Transforms !Path
+    deriving (Show, Read, Eq)
+
+data Canvas
+    = Canvas
+    { canvasOrigin :: !Coord
+    , canvasWidth :: !Double
+    , canvasHeight :: !Double
+    , canvasDrawings :: ![Drawing]
+    } deriving (Show, Read, Eq)
