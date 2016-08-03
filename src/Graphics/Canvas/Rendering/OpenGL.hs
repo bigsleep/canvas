@@ -1,5 +1,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Graphics.Canvas.Rendering.OpenGL
     ( UniformInfo(..)
     , AttribInfo(..)
@@ -13,14 +15,19 @@ module Graphics.Canvas.Rendering.OpenGL
 import Control.Exception (throwIO)
 import Control.Monad (unless)
 import qualified Data.ByteString as BS
+import Data.FileEmbed (embedFile)
+import Data.Proxy (Proxy(..))
 import Foreign.Marshal.Array (withArray)
 import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (sizeOf)
 import Graphics.Canvas.Types
 import qualified Graphics.Rendering.OpenGL as GL
+import Linear (V2(..))
 import System.Mem.Weak (addFinalizer)
 
-data UniformInfo = forall a. (GL.Uniform a, Show a) => UniformInfo !GL.UniformLocation !a
+data UniformLocation a = UniformLocation !(Proxy a) !GL.UniformLocation deriving (Show, Eq)
+
+data UniformInfo = forall a. (GL.Uniform a, Show a) => UniformInfo !(UniformLocation a) !a
 deriving instance Show UniformInfo
 
 data AttribInfo = AttribInfo
@@ -33,8 +40,8 @@ data AttribInfo = AttribInfo
 
 data RenderInfo = RenderInfo
     { riBuffer :: !GL.BufferObject
-    , riComponent :: Component
-    }
+    , riComponent :: !Component
+    } deriving (Show)
 
 data Component = Component
     { componentProgram :: GL.Program
@@ -43,38 +50,44 @@ data Component = Component
     , componentUniforms :: ![UniformInfo]
     , componentIndex :: !GL.ArrayIndex
     , componentNum :: !GL.NumArrayIndices
-    }
+    } deriving (Show)
 
 render :: Canvas -> IO ()
 render (Canvas o w h drawings) = do
     rs <- mkRenderInfos drawings
     mapM_ renderInternal rs
 
-convertDrawing :: Int -> Drawing -> ([GL.Vertex2 GL.GLdouble], [Component])
-convertDrawing index drawing = undefined
+convertDrawing :: SimpleProgram -> Int -> Drawing -> ([GL.Vertex2 GL.GLdouble], [Component])
+convertDrawing sp index (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) =
+    (vs, [component])
+    where
+    vs = map (\(V2 x y) -> GL.Vertex2 x y) [p0, p1, p2]
+    SimpleProgram program attr uniformLocation = sp
+    color = UniformInfo uniformLocation $ GL.Vertex4 1 0 0 0
+    component = Component program GL.Triangles [attr] [color] (fromIntegral index) (fromIntegral $ length vs)
 
-appendDrawing :: Drawing -> (Int, [GL.Vertex2 GL.GLdouble], [Component]) -> (Int, [GL.Vertex2 GL.GLdouble], [Component])
-appendDrawing drawing (index, vs, cs) =
+appendDrawing :: SimpleProgram -> Drawing -> (Int, [GL.Vertex2 GL.GLdouble], [Component]) -> (Int, [GL.Vertex2 GL.GLdouble], [Component])
+appendDrawing sp drawing (index, vs, cs) =
     (index', vs ++ vertices, cs ++ components)
     where
-    (vertices, components) = convertDrawing index drawing
+    (vertices, components) = convertDrawing sp index drawing
     index' = index + length vertices
 
 mkRenderInfos
     :: [Drawing]
     -> IO [RenderInfo]
 mkRenderInfos drawings = do
+    sp <- mkSimpleProgram
+    let (_, vertices, components) = foldr (appendDrawing sp) (0, [], []) drawings
+        vnum = length vertices
+        mkBuffer ptr = do
+            let size = fromIntegral $ vnum * sizeOf (head vertices)
+            GL.bufferData GL.ArrayBuffer GL.$= (size, ptr, GL.StaticDraw)
     buffer <- GL.genObjectName
     GL.bindBuffer GL.ArrayBuffer GL.$= Just buffer
     withArray vertices mkBuffer
     addFinalizer buffer (GL.deleteObjectName buffer)
     return . map (RenderInfo buffer) $ components
-    where
-    (_, vertices, components) = foldr appendDrawing (0, [], []) drawings
-    vnum = length vertices
-    mkBuffer ptr = do
-        let size = fromIntegral $ vnum * sizeOf (head vertices)
-        GL.bufferData GL.ArrayBuffer GL.$= (size, ptr, GL.StaticDraw)
 
 renderInternal
     :: RenderInfo
@@ -90,6 +103,27 @@ renderInternal info = do
     buffer = riBuffer info
     Component program mode attribs uniforms index num = riComponent info
 
+data SimpleProgram = SimpleProgram
+    { spProgram :: !GL.Program
+    , spPositionAttrib :: !AttribInfo
+    , spColorUniformLocation :: UniformLocation (GL.Vertex4 GL.GLfloat)
+    } deriving (Show, Eq)
+
+mkSimpleProgram :: IO SimpleProgram
+mkSimpleProgram = do
+    vertexShader <- mkShader GL.VertexShader $(embedFile "shader/vertex.glsl")
+    fragmentShader <- mkShader GL.FragmentShader $(embedFile "shader/fragment.glsl")
+    program <- mkProgram [vertexShader, fragmentShader]
+
+    GL.attribLocation program "position" GL.$= al
+    let attr = AttribInfo al GL.Float 2 (fromIntegral $ sizeOf (undefined :: GL.Vertex2 GL.GLdouble)) 0
+
+    ul <- GL.uniformLocation program "color"
+    return $ SimpleProgram program attr (UniformLocation (Proxy :: Proxy (GL.Vertex4 GL.GLfloat)) ul)
+
+    where
+    al = GL.AttribLocation 0
+
 bindAttrib :: GL.Program -> AttribInfo -> IO ()
 bindAttrib program vai = do
     GL.vertexAttribArray attribLocation GL.$= GL.Enabled
@@ -102,11 +136,11 @@ bindAttrib program vai = do
 
 
 bindUniform :: GL.Program -> UniformInfo -> IO ()
-bindUniform program (UniformInfo l u) =
+bindUniform program (UniformInfo (UniformLocation _ l) u) =
     GL.uniform l GL.$= u
 
-mkShader :: BS.ByteString -> GL.ShaderType -> IO GL.Shader
-mkShader src shaderType = do
+mkShader :: GL.ShaderType -> BS.ByteString -> IO GL.Shader
+mkShader shaderType src = do
     shader <- GL.createShader shaderType
     GL.shaderSourceBS shader GL.$= src
     GL.compileShader shader

@@ -6,7 +6,7 @@ module Graphics.Canvas.Types
     , ShapeStyle(..)
     , LineStyle(..)
     , FillStyle(..)
-    , Transform(..)
+
     , Transforms
     , Drawing(..)
     , Canvas(..)
@@ -22,9 +22,9 @@ type Color = Data.Color.Color Word8
 
 data Shape
     = Triangle !Coord !Coord !Coord
-    | Rectangle !Coord !Double !Double
-    | Polygon ![Coord]
-    | Circle !Coord !Double
+--    | Rectangle !Coord !Double !Double
+--    | Polygon ![Coord]
+--    | Circle !Coord !Double
     deriving (Show, Read, Eq)
 
 data Path
@@ -62,7 +62,7 @@ type Transforms = [Transform]
 
 data Drawing
     = ShapeDrawing !ShapeStyle !Transforms !Shape
-    | PathDrawing !LineStyle !Transforms !Path
+--    | PathDrawing !LineStyle !Transforms !Path
     deriving (Show, Read, Eq)
 
 data Canvas

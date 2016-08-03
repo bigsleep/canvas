@@ -23,6 +23,7 @@ library
                      , linear
                      , colors
                      , OpenGL
+                     , file-embed
   default-language:    Haskell2010
 
 executable canvas-sample
