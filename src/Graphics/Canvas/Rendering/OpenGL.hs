@@ -6,10 +6,13 @@ module Graphics.Canvas.Rendering.OpenGL
     ( UniformInfo(..)
     , AttribInfo(..)
     , RenderInfo(..)
+    , Component(..)
+    , RenderResource(..)
     , render
     , renderInternal
     , mkShader
     , mkProgram
+    , mkRenderResource
     ) where
 
 import Control.Exception (throwIO)
@@ -52,42 +55,48 @@ data Component = Component
     , componentNum :: !GL.NumArrayIndices
     } deriving (Show)
 
-render :: Canvas -> IO ()
-render (Canvas o w h drawings) = do
-    rs <- mkRenderInfos drawings
+data RenderResource = RenderResource
+    { rrSimpleProgram :: SimpleProgram
+    } deriving (Show)
+
+render :: RenderResource -> Canvas -> IO ()
+render resource (Canvas o w h drawings) = do
+    rs <- mkRenderInfos resource drawings
     mapM_ renderInternal rs
 
-convertDrawing :: SimpleProgram -> Int -> Drawing -> ([GL.Vertex2 GL.GLdouble], [Component])
-convertDrawing sp index (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) =
+convertDrawing :: RenderResource -> Int -> Drawing -> ([GL.Vertex2 GL.GLdouble], [Component])
+convertDrawing resource index (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) =
     (vs, [component])
     where
     vs = map (\(V2 x y) -> GL.Vertex2 x y) [p0, p1, p2]
-    SimpleProgram program attr uniformLocation = sp
-    color = UniformInfo uniformLocation $ GL.Vertex4 1 0 0 0
+    RenderResource (SimpleProgram program attr uniformLocation) = resource
+    color = UniformInfo uniformLocation $ GL.Vertex4 1 0 0 1
     component = Component program GL.Triangles [attr] [color] (fromIntegral index) (fromIntegral $ length vs)
 
-appendDrawing :: SimpleProgram -> Drawing -> (Int, [GL.Vertex2 GL.GLdouble], [Component]) -> (Int, [GL.Vertex2 GL.GLdouble], [Component])
-appendDrawing sp drawing (index, vs, cs) =
+appendDrawing :: RenderResource -> Drawing -> (Int, [GL.Vertex2 GL.GLdouble], [Component]) -> (Int, [GL.Vertex2 GL.GLdouble], [Component])
+appendDrawing resource drawing (index, vs, cs) =
     (index', vs ++ vertices, cs ++ components)
     where
-    (vertices, components) = convertDrawing sp index drawing
+    (vertices, components) = convertDrawing resource index drawing
     index' = index + length vertices
 
 mkRenderInfos
-    :: [Drawing]
+    :: RenderResource
+    -> [Drawing]
     -> IO [RenderInfo]
-mkRenderInfos drawings = do
-    sp <- mkSimpleProgram
-    let (_, vertices, components) = foldr (appendDrawing sp) (0, [], []) drawings
+mkRenderInfos resource drawings = do
+    let (_, vertices, components) = foldr (appendDrawing resource) (0, [], []) drawings
         vnum = length vertices
-        mkBuffer ptr = do
-            let size = fromIntegral $ vnum * sizeOf (head vertices)
-            GL.bufferData GL.ArrayBuffer GL.$= (size, ptr, GL.StaticDraw)
     buffer <- GL.genObjectName
     GL.bindBuffer GL.ArrayBuffer GL.$= Just buffer
-    withArray vertices mkBuffer
+    withArray vertices $ mkBuffer vertices
     addFinalizer buffer (GL.deleteObjectName buffer)
     return . map (RenderInfo buffer) $ components
+    where
+    mkBuffer vs ptr = do
+        let n = length vs
+            size = fromIntegral $ n * sizeOf (head vs)
+        GL.bufferData GL.ArrayBuffer GL.$= (size, ptr, GL.StaticDraw)
 
 renderInternal
     :: RenderInfo
@@ -116,13 +125,16 @@ mkSimpleProgram = do
     program <- mkProgram [vertexShader, fragmentShader]
 
     GL.attribLocation program "position" GL.$= al
-    let attr = AttribInfo al GL.Float 2 (fromIntegral $ sizeOf (undefined :: GL.Vertex2 GL.GLdouble)) 0
+    let attr = AttribInfo al GL.Double 2 (fromIntegral $ sizeOf (undefined :: GL.Vertex2 GL.GLdouble)) 0
 
     ul <- GL.uniformLocation program "color"
     return $ SimpleProgram program attr (UniformLocation (Proxy :: Proxy (GL.Vertex4 GL.GLfloat)) ul)
 
     where
     al = GL.AttribLocation 0
+
+mkRenderResource :: IO RenderResource
+mkRenderResource = fmap RenderResource mkSimpleProgram
 
 bindAttrib :: GL.Program -> AttribInfo -> IO ()
 bindAttrib program vai = do

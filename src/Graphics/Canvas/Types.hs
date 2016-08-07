@@ -1,5 +1,6 @@
 module Graphics.Canvas.Types
-    ( Coord
+    ( color
+    , Coord
     , Color
     , Shape(..)
     , Path(..)
@@ -12,9 +13,9 @@ module Graphics.Canvas.Types
     , Canvas(..)
     ) where
 
-import qualified Data.Color (Color)
+import qualified Data.Color (Color, RGBA(..))
 import Data.Word (Word8)
-import Linear (V2, M22)
+import Linear (V2, V4(..), M22)
 
 type Coord = V2 Double
 
@@ -72,3 +73,6 @@ data Canvas
     , canvasHeight :: !Double
     , canvasDrawings :: ![Drawing]
     } deriving (Show, Read, Eq)
+
+color :: Word8 -> Word8 -> Word8 -> Word8 -> Color
+color r g b a = V4 r g b a

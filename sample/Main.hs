@@ -6,17 +6,32 @@ import qualified Graphics.UI.GLFW as GLFW
 import qualified Graphics.Rendering.OpenGL as GL
 import System.Exit ( exitWith, ExitCode(..) )
 
-import Graphics.Canvas.Types (Canvas(..))
-import Graphics.Canvas.Rendering.OpenGL (render)
+import Graphics.Canvas.Types
+import Graphics.Canvas.Rendering.OpenGL (render, mkRenderResource, RenderResource)
 
 main :: IO ()
 main = do
     let width  = 640
         height = 480
 
-        canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) []
+        lineColor = color 1 0 0 1
+        fillColor = color 0 1 0 1
 
-    withWindow width height "canvas-sample" (return canvas) onDisplay
+        lineStyle = LineStyle lineColor 2
+        fillStyle = FillStyle fillColor
+
+        triangle1 = Triangle (V2 (-0.9) (-0.9)) (V2 0.85 (-0.9)) (V2 (-0.9) 0.85)
+        triangle2 = Triangle (V2 0.9 (-0.85)) (V2 0.9 0.9) (V2 (-0.85) 0.9)
+
+        drawing1 = ShapeDrawing (ShapeStyle lineStyle fillStyle) [] triangle1
+        drawing2 = ShapeDrawing (ShapeStyle lineStyle fillStyle) [] triangle2
+
+        canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) [drawing1, drawing2]
+        init = do
+            resource <- mkRenderResource
+            return (resource, canvas)
+
+    withWindow width height "canvas-sample" init onDisplay
 
     putStrLn "ended!"
 
@@ -52,16 +67,16 @@ shutdown win = do
     return ()
 
 
-onDisplay :: Canvas -> GLFW.Window -> IO ()
-onDisplay canvas win = do
+onDisplay :: (RenderResource, Canvas) -> GLFW.Window -> IO ()
+onDisplay (resource, canvas) win = do
   GL.clearColor GL.$= GL.Color4 1 1 1 1
   GL.clear [GL.ColorBuffer]
-  render canvas
+  render resource canvas
   GLFW.swapBuffers win
 
   forever $ do
      GLFW.pollEvents
-     onDisplay canvas win
+     onDisplay (resource, canvas) win
 
 
 resizeWindow :: GLFW.WindowSizeCallback
