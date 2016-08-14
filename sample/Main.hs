@@ -21,14 +21,22 @@ main = do
 
         lineStyle = LineStyle lineColor 2
         fillStyle = FillStyle fillColor
+        style = (ShapeStyle lineStyle fillStyle)
 
-        triangle1 = Triangle (V2 (-0.9) (-0.9)) (V2 0.85 (-0.9)) (V2 (-0.9) 0.85)
-        triangle2 = Triangle (V2 0.9 (-0.85)) (V2 0.9 0.9) (V2 (-0.85) 0.9)
+        divCount = 20
+        dl = 1 / fromIntegral divCount
 
-        drawing1 = ShapeDrawing (ShapeStyle lineStyle fillStyle) [] triangle1
-        drawing2 = ShapeDrawing (ShapeStyle lineStyle fillStyle) [] triangle2
+        drawings = do
+            i <- [0..(divCount - 1)]
+            j <- [0..(divCount - 1)]
+            let x0 = fromIntegral i * dl
+                y0 = fromIntegral j * dl
+                r = 255
+                triangle = Triangle (V2 x0 y0) (V2 (x0 + dl) y0) (V2 x0 (y0 + dl))
+                style = ShapeStyle (LineStyle (color 0 0 0 1) 2) (FillStyle $ color r 0 0 255)
+            return $ ShapeDrawing style [] triangle
 
-        canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) [drawing1, drawing2]
+        canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings
         init = do
             resource <- allocateRenderResource
             return (resource, canvas)
