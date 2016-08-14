@@ -10,13 +10,16 @@ module Graphics.Canvas.Rendering.OpenGL
     , RenderResource(..)
     , render
     , renderInternal
-    , mkShader
-    , mkProgram
-    , mkRenderResource
+    , allocateShader
+    , allocateProgram
+    , allocateRenderResource
     ) where
 
 import Control.Exception (throwIO)
 import Control.Monad (unless)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Resource (ResourceT)
+import qualified Control.Monad.Trans.Resource as Resource (allocate, runResourceT)
 import qualified Data.ByteString as BS
 import Data.FileEmbed (embedFile)
 import Data.Proxy (Proxy(..))
@@ -26,7 +29,6 @@ import Foreign.Storable (sizeOf)
 import Graphics.Canvas.Types
 import qualified Graphics.Rendering.OpenGL as GL
 import Linear (V2(..))
-import System.Mem.Weak (addFinalizer)
 
 data UniformLocation a = UniformLocation !(Proxy a) !GL.UniformLocation deriving (Show, Eq)
 
@@ -60,9 +62,10 @@ data RenderResource = RenderResource
     } deriving (Show)
 
 render :: RenderResource -> Canvas -> IO ()
-render resource (Canvas o w h drawings) = do
-    rs <- mkRenderInfos resource drawings
-    mapM_ renderInternal rs
+render resource (Canvas o w h drawings) =
+    Resource.runResourceT $
+        allocateRenderInfos resource drawings >>=
+        liftIO . mapM_ renderInternal
 
 convertDrawing :: RenderResource -> Int -> Drawing -> ([GL.Vertex2 GL.GLfloat], [Component])
 convertDrawing resource index (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) =
@@ -80,23 +83,23 @@ appendDrawing resource drawing (index, vs, cs) =
     (vertices, components) = convertDrawing resource index drawing
     index' = index + length vertices
 
-mkRenderInfos
+allocateRenderInfos
     :: RenderResource
     -> [Drawing]
-    -> IO [RenderInfo]
-mkRenderInfos resource drawings = do
+    -> ResourceT IO [RenderInfo]
+allocateRenderInfos resource drawings = do
     let (_, vertices, components) = foldr (appendDrawing resource) (0, [], []) drawings
         vnum = length vertices
-    buffer <- GL.genObjectName
-    GL.bindBuffer GL.ArrayBuffer GL.$= Just buffer
-    withArray vertices $ mkBuffer vertices
-    addFinalizer buffer (GL.deleteObjectName buffer)
+    (_, buffer) <- Resource.allocate (mkBuffer vertices) GL.deleteObjectName
     return . map (RenderInfo buffer) $ components
     where
-    mkBuffer vs ptr = do
+    mkBuffer vs = do
         let n = length vs
             size = fromIntegral $ n * sizeOf (head vs)
-        GL.bufferData GL.ArrayBuffer GL.$= (size, ptr, GL.StaticDraw)
+        buffer <- GL.genObjectName
+        GL.bindBuffer GL.ArrayBuffer GL.$= Just buffer
+        withArray vs $ \ptr -> GL.bufferData GL.ArrayBuffer GL.$= (size, ptr, GL.StaticDraw)
+        return buffer
 
 renderInternal
     :: RenderInfo
@@ -118,23 +121,24 @@ data SimpleProgram = SimpleProgram
     , spColorUniformLocation :: UniformLocation (GL.Vertex4 GL.GLfloat)
     } deriving (Show, Eq)
 
-mkSimpleProgram :: IO SimpleProgram
-mkSimpleProgram = do
-    vertexShader <- mkShader GL.VertexShader $(embedFile "shader/vertex.glsl")
-    fragmentShader <- mkShader GL.FragmentShader $(embedFile "shader/fragment.glsl")
-    program <- mkProgram [vertexShader, fragmentShader]
+allocateSimpleProgram :: ResourceT IO SimpleProgram
+allocateSimpleProgram = do
+    vertexShader <- allocateShader GL.VertexShader $(embedFile "shader/vertex.glsl")
+    fragmentShader <- allocateShader GL.FragmentShader $(embedFile "shader/fragment.glsl")
+    program <- allocateProgram [vertexShader, fragmentShader]
 
-    GL.attribLocation program "position" GL.$= al
-    let attr = AttribInfo al GL.Float 2 (fromIntegral $ sizeOf (undefined :: GL.Vertex2 GL.GLfloat)) 0
+    liftIO $ do
+        GL.attribLocation program "position" GL.$= al
+        let attr = AttribInfo al GL.Float 2 (fromIntegral $ sizeOf (undefined :: GL.Vertex2 GL.GLfloat)) 0
 
-    ul <- GL.uniformLocation program "color"
-    return $ SimpleProgram program attr (UniformLocation (Proxy :: Proxy (GL.Vertex4 GL.GLfloat)) ul)
+        ul <- GL.uniformLocation program "color"
+        return $ SimpleProgram program attr (UniformLocation (Proxy :: Proxy (GL.Vertex4 GL.GLfloat)) ul)
 
     where
     al = GL.AttribLocation 0
 
-mkRenderResource :: IO RenderResource
-mkRenderResource = fmap RenderResource mkSimpleProgram
+allocateRenderResource :: ResourceT IO RenderResource
+allocateRenderResource = fmap RenderResource allocateSimpleProgram
 
 bindAttrib :: GL.Program -> AttribInfo -> IO ()
 bindAttrib program vai = do
@@ -151,25 +155,32 @@ bindUniform :: GL.Program -> UniformInfo -> IO ()
 bindUniform program (UniformInfo (UniformLocation _ l) u) =
     GL.uniform l GL.$= u
 
-mkShader :: GL.ShaderType -> BS.ByteString -> IO GL.Shader
-mkShader shaderType src = do
-    shader <- GL.createShader shaderType
-    GL.shaderSourceBS shader GL.$= src
-    GL.compileShader shader
-    addFinalizer shader $ GL.deleteObjectName shader
-    checkStatus GL.compileStatus GL.shaderInfoLog "shader compile error" shader
+allocateShader :: GL.ShaderType -> BS.ByteString -> ResourceT IO GL.Shader
+allocateShader shaderType src = do
+    (_, shader) <- Resource.allocate allocateShader GL.deleteObjectName
     return shader
+    where
+    allocateShader = do
+        shader <- GL.createShader shaderType
+        GL.shaderSourceBS shader GL.$= src
+        GL.compileShader shader
+        checkStatus GL.compileStatus GL.shaderInfoLog "shader compile error" shader
+        return shader
 
-mkProgram :: [GL.Shader] -> IO GL.Program
-mkProgram shaders = do
-    program <- GL.createProgram
-    mapM_ (GL.attachShader program) shaders
-    GL.linkProgram program
-    addFinalizer program $ do
+allocateProgram :: [GL.Shader] -> ResourceT IO GL.Program
+allocateProgram shaders = do
+    (_, program) <- Resource.allocate mkProgram finalizeProgram
+    return program
+    where
+    mkProgram = do
+        program <- GL.createProgram
+        mapM_ (GL.attachShader program) shaders
+        GL.linkProgram program
+        checkStatus GL.linkStatus GL.programInfoLog "program link error" program
+        return program
+    finalizeProgram program = do
         mapM_ (GL.detachShader program) shaders
         GL.deleteObjectName program
-    checkStatus GL.linkStatus GL.programInfoLog "program link error" program
-    return program
 
 
 checkStatus
@@ -183,7 +194,3 @@ checkStatus getStatus getInfoLog message object = do
     unless ok $ do
         log <- GL.get . getInfoLog $ object
         throwIO . userError $ message ++ ": " ++ log
-
-
-sizeOfVertex2D :: Int
-sizeOfVertex2D = sizeOf (undefined :: GL.Vertex2 Float)

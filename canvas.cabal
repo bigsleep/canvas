@@ -24,6 +24,8 @@ library
                      , colors
                      , OpenGL
                      , file-embed
+                     , transformers
+                     , resourcet
   default-language:    Haskell2010
 
 executable canvas-sample
@@ -34,4 +36,6 @@ executable canvas-sample
                      , OpenGL
                      , GLFW-b
                      , canvas
+                     , transformers
+                     , resourcet
   default-language:    Haskell2010

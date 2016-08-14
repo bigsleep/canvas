@@ -1,13 +1,15 @@
 module Main where
 
 import Control.Monad (when, forever, unless)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Resource (ResourceT, runResourceT)
 import Linear (V2(..))
 import qualified Graphics.UI.GLFW as GLFW
 import qualified Graphics.Rendering.OpenGL as GL
 import System.Exit ( exitWith, ExitCode(..) )
 
 import Graphics.Canvas.Types
-import Graphics.Canvas.Rendering.OpenGL (render, mkRenderResource, RenderResource)
+import Graphics.Canvas.Rendering.OpenGL (render, allocateRenderResource, RenderResource)
 
 main :: IO ()
 main = do
@@ -28,7 +30,7 @@ main = do
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) [drawing1, drawing2]
         init = do
-            resource <- mkRenderResource
+            resource <- allocateRenderResource
             return (resource, canvas)
 
     withWindow width height "canvas-sample" init onDisplay
@@ -37,7 +39,7 @@ main = do
 
 
 
-withWindow :: Int -> Int -> String -> IO a -> (a -> GLFW.Window -> IO ()) -> IO ()
+withWindow :: Int -> Int -> String -> ResourceT IO a -> (a -> GLFW.Window -> IO ()) -> IO ()
 withWindow width height title constructor f = do
     GLFW.setErrorCallback $ Just simpleErrorCallback
     r <- GLFW.init
@@ -48,8 +50,7 @@ withWindow width height title constructor f = do
               GLFW.makeContextCurrent m
               GLFW.setWindowSizeCallback win (Just resizeWindow)
               GLFW.setWindowCloseCallback win (Just shutdown)
-              a <- constructor
-              f a win
+              runResourceT $ constructor >>= liftIO . flip f win
               GLFW.setErrorCallback $ Just simpleErrorCallback
               GLFW.destroyWindow win
           Nothing -> return ()
