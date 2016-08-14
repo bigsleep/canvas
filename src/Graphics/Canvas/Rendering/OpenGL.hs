@@ -64,7 +64,7 @@ render resource (Canvas o w h drawings) = do
     rs <- mkRenderInfos resource drawings
     mapM_ renderInternal rs
 
-convertDrawing :: RenderResource -> Int -> Drawing -> ([GL.Vertex2 GL.GLdouble], [Component])
+convertDrawing :: RenderResource -> Int -> Drawing -> ([GL.Vertex2 GL.GLfloat], [Component])
 convertDrawing resource index (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) =
     (vs, [component])
     where
@@ -73,7 +73,7 @@ convertDrawing resource index (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)
     color = UniformInfo uniformLocation $ GL.Vertex4 1 0 0 1
     component = Component program GL.Triangles [attr] [color] (fromIntegral index) (fromIntegral $ length vs)
 
-appendDrawing :: RenderResource -> Drawing -> (Int, [GL.Vertex2 GL.GLdouble], [Component]) -> (Int, [GL.Vertex2 GL.GLdouble], [Component])
+appendDrawing :: RenderResource -> Drawing -> (Int, [GL.Vertex2 GL.GLfloat], [Component]) -> (Int, [GL.Vertex2 GL.GLfloat], [Component])
 appendDrawing resource drawing (index, vs, cs) =
     (index', vs ++ vertices, cs ++ components)
     where
@@ -125,7 +125,7 @@ mkSimpleProgram = do
     program <- mkProgram [vertexShader, fragmentShader]
 
     GL.attribLocation program "position" GL.$= al
-    let attr = AttribInfo al GL.Double 2 (fromIntegral $ sizeOf (undefined :: GL.Vertex2 GL.GLdouble)) 0
+    let attr = AttribInfo al GL.Float 2 (fromIntegral $ sizeOf (undefined :: GL.Vertex2 GL.GLfloat)) 0
 
     ul <- GL.uniformLocation program "color"
     return $ SimpleProgram program attr (UniformLocation (Proxy :: Proxy (GL.Vertex4 GL.GLfloat)) ul)
@@ -186,4 +186,4 @@ checkStatus getStatus getInfoLog message object = do
 
 
 sizeOfVertex2D :: Int
-sizeOfVertex2D = sizeOf (undefined :: GL.Vertex2 Double)
+sizeOfVertex2D = sizeOf (undefined :: GL.Vertex2 Float)

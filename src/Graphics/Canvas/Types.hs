@@ -17,22 +17,22 @@ import qualified Data.Color (Color, RGBA(..))
 import Data.Word (Word8)
 import Linear (V2, V4(..), M22)
 
-type Coord = V2 Double
+type Coord = V2 Float
 
 type Color = Data.Color.Color Word8
 
 data Shape
     = Triangle !Coord !Coord !Coord
---    | Rectangle !Coord !Double !Double
+--    | Rectangle !Coord !Float !Float
 --    | Polygon ![Coord]
---    | Circle !Coord !Double
+--    | Circle !Coord !Float
     deriving (Show, Read, Eq)
 
 data Path
     = LoopPath ![Coord]
     | StripPath ![Coord]
     | FragmentPath ![Coord]
-    | Arc !Coord !Double !Double !Double
+    | Arc !Coord !Float !Float !Float
     deriving (Show, Read, Eq)
 
 data ShapeStyle = ShapeStyle
@@ -43,7 +43,7 @@ data ShapeStyle = ShapeStyle
 
 data LineStyle = LineStyle
     { lineStyleColor :: !Color
-    , lineStyleWidth :: !Double
+    , lineStyleWidth :: !Float
     }
     deriving (Show, Read, Eq)
 
@@ -53,10 +53,10 @@ data FillStyle = FillStyle
     deriving (Show, Read, Eq)
 
 data Transform
-    = Rotate !Double !Coord
+    = Rotate !Float !Coord
     | Translate !Coord
-    | Scale !Double
-    | Affine !(M22 Double)
+    | Scale !Float
+    | Affine !(M22 Float)
     deriving (Show, Read, Eq)
 
 type Transforms = [Transform]
@@ -69,8 +69,8 @@ data Drawing
 data Canvas
     = Canvas
     { canvasOrigin :: !Coord
-    , canvasWidth :: !Double
-    , canvasHeight :: !Double
+    , canvasWidth :: !Float
+    , canvasHeight :: !Float
     , canvasDrawings :: ![Drawing]
     } deriving (Show, Read, Eq)
 
