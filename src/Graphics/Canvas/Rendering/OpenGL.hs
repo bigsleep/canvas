@@ -6,7 +6,6 @@ module Graphics.Canvas.Rendering.OpenGL
     ( UniformInfo(..)
     , AttribInfo(..)
     , RenderInfo(..)
-    , Component(..)
     , RenderResource(..)
     , render
     , renderInternal
@@ -44,17 +43,13 @@ data AttribInfo = AttribInfo
     } deriving (Show, Eq)
 
 data RenderInfo = RenderInfo
-    { riBuffer :: !GL.BufferObject
-    , riComponent :: !Component
-    } deriving (Show)
-
-data Component = Component
-    { componentProgram :: GL.Program
-    , componentMode :: GL.PrimitiveMode
-    , componentAttribs :: ![AttribInfo]
-    , componentUniforms :: ![UniformInfo]
-    , componentIndex :: !GL.ArrayIndex
-    , componentNum :: !GL.NumArrayIndices
+    { riProgram :: !GL.Program
+    , riAttribs :: ![AttribInfo]
+    , riUniforms :: ![UniformInfo]
+    , riMode :: !GL.PrimitiveMode
+    , riBuffer :: !GL.BufferObject
+    , riIndex :: !GL.ArrayIndex
+    , riNum :: !GL.NumArrayIndices
     } deriving (Show)
 
 data RenderResource = RenderResource
@@ -64,12 +59,11 @@ data RenderResource = RenderResource
 render :: RenderResource -> Canvas -> IO ()
 render resource (Canvas o w h drawings) =
     Resource.runResourceT $
-        allocateRenderInfos resource drawings >>=
-        liftIO . mapM_ renderInternal
+        allocateRenderInfo resource drawings >>=
+        liftIO . renderInternal
 
-convertDrawing :: RenderResource -> Int -> Drawing -> ([GL.Vertex2 GL.GLfloat], [Component])
-convertDrawing resource index (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) =
-    (vs, [component])
+convertDrawing :: Drawing -> (Int, [GL.Vertex2 GL.GLfloat])
+convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = (3, vs)
     where
     FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
     c0 = GL.Vertex2 r g
@@ -79,26 +73,19 @@ convertDrawing resource index (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)
     p1' = toV p1
     p2' = toV p2
     vs = [p0', c0, c1, p1', c0, c1, p2', c0, c1]
-    RenderResource (SimpleProgram program positionAttrib colorAttrib) = resource
-    component = Component program GL.Triangles [positionAttrib, colorAttrib] [] (fromIntegral index) (fromIntegral $ length vs)
 
-appendDrawing :: RenderResource -> Drawing -> (Int, [GL.Vertex2 GL.GLfloat], [Component]) -> (Int, [GL.Vertex2 GL.GLfloat], [Component])
-appendDrawing resource drawing (index, vs, cs) =
-    (index', vs ++ vertices, cs ++ components)
-    where
-    (vertices, components) = convertDrawing resource index drawing
-    index' = index + length vertices
-
-allocateRenderInfos
+allocateRenderInfo
     :: RenderResource
     -> [Drawing]
-    -> ResourceT IO [RenderInfo]
-allocateRenderInfos resource drawings = do
-    let (_, vertices, components) = foldr (appendDrawing resource) (0, [], []) drawings
-        vnum = length vertices
+    -> ResourceT IO RenderInfo
+allocateRenderInfo resource drawings = do
     (_, buffer) <- Resource.allocate (mkBuffer vertices) GL.deleteObjectName
-    return . map (RenderInfo buffer) $ components
+    return $ RenderInfo program [positionAttrib, colorAttrib] [] GL.Triangles buffer 0 num
     where
+    SimpleProgram program positionAttrib colorAttrib = rrSimpleProgram resource
+    (ns, vs) = unzip . map convertDrawing $ drawings
+    vertices = concat vs
+    num = fromIntegral $ sum ns
     mkBuffer vs = do
         let n = length vs
             size = fromIntegral $ n * sizeOf (head vs)
@@ -118,8 +105,7 @@ renderInternal info = do
     GL.drawArrays mode (fromIntegral index) (fromIntegral num)
 
     where
-    buffer = riBuffer info
-    Component program mode attribs uniforms index num = riComponent info
+    RenderInfo program attribs uniforms mode buffer index num = info
 
 data SimpleProgram = SimpleProgram
     { spProgram :: !GL.Program

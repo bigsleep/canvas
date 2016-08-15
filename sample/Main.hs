@@ -23,7 +23,7 @@ main = do
         fillStyle = FillStyle fillColor
         style = (ShapeStyle lineStyle fillStyle)
 
-        divCount = 20
+        divCount = 40
         dl = 1 / fromIntegral divCount
 
         drawings = do
