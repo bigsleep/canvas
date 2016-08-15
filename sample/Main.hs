@@ -3,7 +3,7 @@ module Main where
 import Control.Monad (when, forever, unless)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Resource (ResourceT, runResourceT)
-import Linear (V2(..))
+import Linear (V2(..), V4(..))
 import qualified Graphics.UI.GLFW as GLFW
 import qualified Graphics.Rendering.OpenGL as GL
 import System.Exit ( exitWith, ExitCode(..) )
@@ -16,8 +16,8 @@ main = do
     let width  = 640
         height = 480
 
-        lineColor = color 1 0 0 1
-        fillColor = color 0 1 0 1
+        lineColor = V4 1 0 0 1
+        fillColor = V4 0 1 0 1
 
         lineStyle = LineStyle lineColor 2
         fillStyle = FillStyle fillColor
@@ -33,7 +33,7 @@ main = do
                 y0 = fromIntegral j * dl
                 r = 255
                 triangle = Triangle (V2 x0 y0) (V2 (x0 + dl) y0) (V2 x0 (y0 + dl))
-                style = ShapeStyle (LineStyle (color 0 0 0 1) 2) (FillStyle $ color r 0 0 255)
+                style = ShapeStyle (LineStyle (V4 0 0 0 1) 2) (FillStyle $ V4 r 0 0 255)
             return $ ShapeDrawing style [] triangle
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings

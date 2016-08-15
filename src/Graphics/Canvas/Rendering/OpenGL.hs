@@ -28,7 +28,7 @@ import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (sizeOf)
 import Graphics.Canvas.Types
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V2(..))
+import Linear (V2(..), V4(..))
 
 data UniformLocation a = UniformLocation !(Proxy a) !GL.UniformLocation deriving (Show, Eq)
 
@@ -71,10 +71,16 @@ convertDrawing :: RenderResource -> Int -> Drawing -> ([GL.Vertex2 GL.GLfloat], 
 convertDrawing resource index (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) =
     (vs, [component])
     where
-    vs = map (\(V2 x y) -> GL.Vertex2 x y) [p0, p1, p2]
-    RenderResource (SimpleProgram program attr uniformLocation) = resource
-    color = UniformInfo uniformLocation $ GL.Vertex4 1 0 0 1
-    component = Component program GL.Triangles [attr] [color] (fromIntegral index) (fromIntegral $ length vs)
+    FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
+    c0 = GL.Vertex2 r g
+    c1 = GL.Vertex2 b a
+    toV (V2 x y) = GL.Vertex2 x y
+    p0' = toV p0
+    p1' = toV p1
+    p2' = toV p2
+    vs = [p0', c0, c1, p1', c0, c1, p2', c0, c1]
+    RenderResource (SimpleProgram program positionAttrib colorAttrib) = resource
+    component = Component program GL.Triangles [positionAttrib, colorAttrib] [] (fromIntegral index) (fromIntegral $ length vs)
 
 appendDrawing :: RenderResource -> Drawing -> (Int, [GL.Vertex2 GL.GLfloat], [Component]) -> (Int, [GL.Vertex2 GL.GLfloat], [Component])
 appendDrawing resource drawing (index, vs, cs) =
@@ -118,7 +124,7 @@ renderInternal info = do
 data SimpleProgram = SimpleProgram
     { spProgram :: !GL.Program
     , spPositionAttrib :: !AttribInfo
-    , spColorUniformLocation :: UniformLocation (GL.Vertex4 GL.GLfloat)
+    , spColorAttrib :: !AttribInfo
     } deriving (Show, Eq)
 
 allocateSimpleProgram :: ResourceT IO SimpleProgram
@@ -128,14 +134,19 @@ allocateSimpleProgram = do
     program <- allocateProgram [vertexShader, fragmentShader]
 
     liftIO $ do
-        GL.attribLocation program "position" GL.$= al
-        let attr = AttribInfo al GL.Float 2 (fromIntegral $ sizeOf (undefined :: GL.Vertex2 GL.GLfloat)) 0
+        GL.attribLocation program "position" GL.$= positionAttribLocation
+        let positionAttrib = AttribInfo positionAttribLocation GL.Float 2 stride 0
 
-        ul <- GL.uniformLocation program "color"
-        return $ SimpleProgram program attr (UniformLocation (Proxy :: Proxy (GL.Vertex4 GL.GLfloat)) ul)
+        GL.attribLocation program "color" GL.$= colorAttribLocation
+        let colorAttrib = AttribInfo colorAttribLocation GL.Float 4 stride colorOffset
+
+        return $ SimpleProgram program positionAttrib colorAttrib
 
     where
-    al = GL.AttribLocation 0
+    positionAttribLocation = GL.AttribLocation 0
+    colorAttribLocation = GL.AttribLocation 1
+    stride = fromIntegral $ 6 * sizeOf (undefined :: GL.GLfloat)
+    colorOffset = 2 * sizeOf (undefined :: GL.GLfloat)
 
 allocateRenderResource :: ResourceT IO RenderResource
 allocateRenderResource = fmap RenderResource allocateSimpleProgram

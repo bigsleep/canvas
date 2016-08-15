@@ -1,6 +1,5 @@
 module Graphics.Canvas.Types
-    ( color
-    , Coord
+    ( Coord
     , Color
     , Shape(..)
     , Path(..)
@@ -19,7 +18,7 @@ import Linear (V2, V4(..), M22)
 
 type Coord = V2 Float
 
-type Color = Data.Color.Color Word8
+type Color = Data.Color.Color Float
 
 data Shape
     = Triangle !Coord !Coord !Coord
@@ -73,6 +72,3 @@ data Canvas
     , canvasHeight :: !Float
     , canvasDrawings :: ![Drawing]
     } deriving (Show, Read, Eq)
-
-color :: Word8 -> Word8 -> Word8 -> Word8 -> Color
-color r g b a = V4 r g b a
