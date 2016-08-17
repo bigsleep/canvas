@@ -66,13 +66,8 @@ convertDrawing :: Drawing -> (Int, [GL.Vertex2 GL.GLfloat])
 convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = (3, vs)
     where
     FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
-    c0 = GL.Vertex2 r g
-    c1 = GL.Vertex2 b a
-    toV (V2 x y) = GL.Vertex2 x y
-    p0' = toV p0
-    p1' = toV p1
-    p2' = toV p2
-    vs = [p0', c0, c1, p1', c0, c1, p2', c0, c1]
+    f (V2 x y) = [GL.Vertex2 x y, GL.Vertex2 r g, GL.Vertex2 b a]
+    vs = concat . map f $ [p0, p1, p2]
 
 allocateRenderInfo
     :: RenderResource
