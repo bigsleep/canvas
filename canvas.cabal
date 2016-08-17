@@ -28,9 +28,21 @@ library
                      , resourcet
   default-language:    Haskell2010
 
-executable canvas-sample
+executable triangle-sample
   hs-source-dirs:      sample
-  main-is:             Main.hs
+  main-is:             Triangle.hs
+  build-depends:       base >= 4.7 && < 5
+                     , linear
+                     , OpenGL
+                     , GLFW-b
+                     , canvas
+                     , transformers
+                     , resourcet
+  default-language:    Haskell2010
+
+executable rectangle-sample
+  hs-source-dirs:      sample
+  main-is:             Rectangle.hs
   build-depends:       base >= 4.7 && < 5
                      , linear
                      , OpenGL
