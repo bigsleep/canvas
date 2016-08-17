@@ -69,6 +69,17 @@ convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = (3, vs)
     f (V2 x y) = [GL.Vertex2 x y, GL.Vertex2 r g, GL.Vertex2 b a]
     vs = concat . map f $ [p0, p1, p2]
 
+convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = (6, vs)
+    where
+    V2 x y = p0
+    p1 = V2 (x + width) y
+    p2 = V2 (x + width) (y + height)
+    p3 = V2 x (y + height)
+    ps = [p0, p1, p3, p1, p2, p3]
+    FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
+    f (V2 x y) = [GL.Vertex2 x y, GL.Vertex2 r g, GL.Vertex2 b a]
+    vs = concat . map f $ ps
+
 allocateRenderInfo
     :: RenderResource
     -> [Drawing]

@@ -22,7 +22,7 @@ type Color = Data.Color.Color Float
 
 data Shape
     = Triangle !Coord !Coord !Coord
---    | Rectangle !Coord !Float !Float
+    | Rectangle !Coord !Float !Float
 --    | Polygon ![Coord]
 --    | Circle !Coord !Float
     deriving (Show, Read, Eq)
