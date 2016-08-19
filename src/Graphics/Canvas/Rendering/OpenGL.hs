@@ -27,7 +27,7 @@ import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (sizeOf)
 import Graphics.Canvas.Types
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V2(..), V4(..))
+import Linear (V2(..), V4(..), (!*))
 
 data UniformLocation a = UniformLocation !(Proxy a) !GL.UniformLocation deriving (Show, Eq)
 
@@ -79,6 +79,21 @@ convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = (6,
     FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
     f (V2 x y) = [GL.Vertex2 x y, GL.Vertex2 r g, GL.Vertex2 b a]
     vs = concat . map f $ ps
+
+convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = (vnum, vs)
+    where
+    division = 20 :: Int
+    da = 2 * pi / fromIntegral division :: Float
+    cosa = cos da
+    sina = sin da
+    rmat = V2 (V2 cosa (-sina)) (V2 sina cosa)
+    vs0 = map (+p0) . take division $ iterate (rmat !*) (V2 0 radius)
+    vs = map toV . concat $ zipWith (\p1 p2 -> [p0, c0, c1, p1, c0, c1, p2, c0, c1]) (tail $ cycle vs0) vs0
+    vnum = division * 3
+    FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
+    c0 = V2 r g
+    c1 = V2 b a
+    toV (V2 x y) = GL.Vertex2 x y
 
 allocateRenderInfo
     :: RenderResource
