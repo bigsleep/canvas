@@ -27,7 +27,7 @@ import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (sizeOf)
 import Graphics.Canvas.Types
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V2(..), V4(..), (!*))
+import Linear (V2(..), V3(..), V4(..), (!*))
 
 data UniformLocation a = UniformLocation !(Proxy a) !GL.UniformLocation deriving (Show, Eq)
 
@@ -47,7 +47,8 @@ data RenderInfo = RenderInfo
     , riAttribs :: ![AttribInfo]
     , riUniforms :: ![UniformInfo]
     , riMode :: !GL.PrimitiveMode
-    , riBuffer :: !GL.BufferObject
+    , riVertexBuffer :: !GL.BufferObject
+    , riIndexBuffer :: !GL.BufferObject
     , riIndex :: !GL.ArrayIndex
     , riNum :: !GL.NumArrayIndices
     } deriving (Show)
@@ -62,57 +63,74 @@ render resource (Canvas o w h drawings) =
         allocateRenderInfo resource drawings >>=
         liftIO . renderInternal
 
-convertDrawing :: Drawing -> (Int, [GL.Vertex2 GL.GLfloat])
-convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = (3, vs)
+convertDrawing :: GL.GLuint -> Drawing -> ([GL.Vertex2 GL.GLfloat], [GL.GLuint])
+convertDrawing start (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = (vertices, indices)
     where
     FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
     f (V2 x y) = [GL.Vertex2 x y, GL.Vertex2 r g, GL.Vertex2 b a]
-    vs = concat . map f $ [p0, p1, p2]
+    vertices = concat . map f $ [p0, p1, p2]
+    indices = map (+ start) [0..2]
 
-convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = (6, vs)
+convertDrawing start (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = (vertices, indices)
     where
     V2 x y = p0
     p1 = V2 (x + width) y
     p2 = V2 (x + width) (y + height)
     p3 = V2 x (y + height)
-    ps = [p0, p1, p3, p1, p2, p3]
+    ps = [p0, p1, p2, p3]
     FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
     f (V2 x y) = [GL.Vertex2 x y, GL.Vertex2 r g, GL.Vertex2 b a]
-    vs = concat . map f $ ps
+    vertices = concat . map f $ ps
+    indices = map (+ start) [0, 1, 3, 1, 2, 3]
 
-convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = (vnum, vs)
+convertDrawing start (ShapeDrawing shapeStyle trans (Circle p0 radius)) = (vertices, indices)
     where
-    division = 20 :: Int
-    da = 2 * pi / fromIntegral division :: Float
-    cosa = cos da
-    sina = sin da
-    rmat = V2 (V2 cosa (-sina)) (V2 sina cosa)
-    vs0 = map (+p0) . take division $ iterate (rmat !*) (V2 0 radius)
-    vs = map toV . concat $ zipWith (\p1 p2 -> [p0, c0, c1, p1, c0, c1, p2, c0, c1]) (tail $ cycle vs0) vs0
-    vnum = division * 3
+    V2 x y = p0
+    m = V2 (V3 radius 0 x)
+           (V3 0 radius y)
+    vs = map (\(V2 px py) -> m !* V3 px py 1)$ circleVertices
+    vertices = map toV . concat . map (\p -> [p, c0, c1]) $ vs
+    indices = concat . take circleDivision $ zipWith (\i j -> [start, i, j]) [(start + 1)..] [(start + 2)..]
     FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
     c0 = V2 r g
     c1 = V2 b a
     toV (V2 x y) = GL.Vertex2 x y
+
+circleDivision :: Int
+circleDivision = 20
+
+circleVertices :: [V2 Float]
+circleVertices = vertices
+    where
+    division = circleDivision
+    da = 2 * pi / fromIntegral division :: Float
+    cosa = cos da
+    sina = sin da
+    rmat = V2 (V2 cosa (-sina)) (V2 sina cosa)
+    vertices = (V2 0 0 :) . take division $ iterate (rmat !*) (V2 0 1)
+
+appendDrawing :: Drawing -> (GL.GLuint, [GL.Vertex2 GL.GLfloat], [GL.GLuint]) -> (GL.GLuint, [GL.Vertex2 GL.GLfloat], [GL.GLuint])
+appendDrawing drawing (i, vs0, is0) = (i + fromIntegral (length is), vs0 ++ vs, is0 ++ is)
+    where
+    (vs, is) = convertDrawing i drawing
 
 allocateRenderInfo
     :: RenderResource
     -> [Drawing]
     -> ResourceT IO RenderInfo
 allocateRenderInfo resource drawings = do
-    (_, buffer) <- Resource.allocate (mkBuffer vertices) GL.deleteObjectName
-    return $ RenderInfo program [positionAttrib, colorAttrib] [] GL.Triangles buffer 0 num
+    (_, vertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
+    (_, indexBuffer) <- Resource.allocate (mkBuffer GL.ElementArrayBuffer is) GL.deleteObjectName
+    return $ RenderInfo program [positionAttrib, colorAttrib] [] GL.Triangles vertexBuffer indexBuffer 0 (fromIntegral num)
     where
     SimpleProgram program positionAttrib colorAttrib = rrSimpleProgram resource
-    (ns, vs) = unzip . map convertDrawing $ drawings
-    vertices = concat vs
-    num = fromIntegral $ sum ns
-    mkBuffer vs = do
-        let n = length vs
-            size = fromIntegral $ n * sizeOf (head vs)
+    (num, vs, is) = foldr appendDrawing (0, [], []) $ drawings
+    mkBuffer bufferType xs = do
+        let n = length xs
+            size = fromIntegral $ n * sizeOf (head xs)
         buffer <- GL.genObjectName
-        GL.bindBuffer GL.ArrayBuffer GL.$= Just buffer
-        withArray vs $ \ptr -> GL.bufferData GL.ArrayBuffer GL.$= (size, ptr, GL.StaticDraw)
+        GL.bindBuffer bufferType GL.$= Just buffer
+        withArray xs $ \ptr -> GL.bufferData bufferType GL.$= (size, ptr, GL.StreamDraw)
         return buffer
 
 renderInternal
@@ -122,10 +140,10 @@ renderInternal info = do
     GL.currentProgram GL.$= Just program
     mapM_ (bindAttrib program) attribs
     mapM_ (bindUniform program) uniforms
-    GL.drawArrays mode (fromIntegral index) (fromIntegral num)
+    GL.drawElements mode num GL.UnsignedInt Ptr.nullPtr
 
     where
-    RenderInfo program attribs uniforms mode buffer index num = info
+    RenderInfo program attribs uniforms mode vertexBuffer indexBuffer index num = info
 
 data SimpleProgram = SimpleProgram
     { spProgram :: !GL.Program
