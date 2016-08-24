@@ -120,7 +120,6 @@ renderInternal
     -> IO ()
 renderInternal info = do
     GL.currentProgram GL.$= Just program
-    GL.bindBuffer GL.ArrayBuffer GL.$= Just buffer
     mapM_ (bindAttrib program) attribs
     mapM_ (bindUniform program) uniforms
     GL.drawArrays mode (fromIntegral index) (fromIntegral num)
