@@ -21,6 +21,7 @@ import Control.Monad.Trans.Resource (ResourceT)
 import qualified Control.Monad.Trans.Resource as Resource (allocate, runResourceT)
 import qualified Data.ByteString as BS
 import Data.FileEmbed (embedFile)
+import Data.Foldable (Foldable(..))
 import Data.Proxy (Proxy(..))
 import Foreign.Marshal.Array (withArray)
 import qualified Foreign.Ptr as Ptr
@@ -48,13 +49,12 @@ data RenderInfo = RenderInfo
     , riUniforms :: ![UniformInfo]
     , riMode :: !GL.PrimitiveMode
     , riVertexBuffer :: !GL.BufferObject
-    , riIndexBuffer :: !GL.BufferObject
     , riIndex :: !GL.ArrayIndex
     , riNum :: !GL.NumArrayIndices
     } deriving (Show)
 
 data RenderResource = RenderResource
-    { rrSimpleProgram :: SimpleProgram
+    { rrProgramInfo :: ProgramInfo
     } deriving (Show)
 
 render :: RenderResource -> Canvas -> IO ()
@@ -63,41 +63,53 @@ render resource (Canvas o w h drawings) =
         allocateRenderInfo resource drawings >>=
         liftIO . renderInternal
 
-convertDrawing :: GL.GLuint -> Drawing -> ([GL.Vertex2 GL.GLfloat], [GL.GLuint])
-convertDrawing start (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = (vertices, indices)
-    where
-    FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
-    f (V2 x y) = [GL.Vertex2 x y, GL.Vertex2 r g, GL.Vertex2 b a]
-    vertices = concat . map f $ [p0, p1, p2]
-    indices = map (+ start) [0..2]
+rotate :: (a, a, a) -> (a, a, a)
+rotate (q0, q1, q2) = (q1, q2, q0)
 
-convertDrawing start (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = (vertices, indices)
+convertDrawing :: Drawing -> [GL.GLfloat]
+convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = vertices
     where
+    LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
+    FillStyle fillColor = shapeStyleFillStyle shapeStyle
+    vs = take 3 $ iterate rotate (toList p0, toList p1, toList p2)
+    otherVals = toList fillColor ++ toList lineColor ++ [lineWidth]
+    format (q0, q1, q2) = concat [q0, q1, q2, otherVals]
+    vertices = concat . map format $ vs
+
+convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = vertices
+    where
+    LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
+    FillStyle fillColor = shapeStyleFillStyle shapeStyle
+    vals = toList fillColor ++ toList lineColor
     V2 x y = p0
     p1 = V2 (x + width) y
     p2 = V2 (x + width) (y + height)
     p3 = V2 x (y + height)
-    ps = [p0, p1, p2, p3]
-    FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
-    f (V2 x y) = [GL.Vertex2 x y, GL.Vertex2 r g, GL.Vertex2 b a]
-    vertices = concat . map f $ ps
-    indices = map (+ start) [0, 1, 3, 1, 2, 3]
+    format ((q0, _), (q1, w), (q2, _)) = concat [q0, q1, q2, vals, [w]]
+    gen (q0, q1, q2)= take 3 (iterate rotate ((toList q0, lineWidth), (toList q1, lineWidth), (toList q2, 0)))
+    vs = gen (p2, p0, p1) ++ gen (p0, p2, p3)
+    vertices = concat . map format $ vs
 
-convertDrawing start (ShapeDrawing shapeStyle trans (Circle p0 radius)) = (vertices, indices)
+convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = vertices
     where
+    LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
+    FillStyle fillColor = shapeStyleFillStyle shapeStyle
+    vals = toList fillColor ++ toList lineColor
     V2 x y = p0
     m = V2 (V3 radius 0 x)
            (V3 0 radius y)
     vs = map (\(V2 px py) -> m !* V3 px py 1)$ circleVertices
-    vertices = map toV . concat . map (\p -> [p, c0, c1]) $ vs
-    indices = concat . take circleDivision $ zipWith (\i j -> [start, i, j]) [(start + 1)..] [(start + 2)..]
+    format ((q0, _), (q1, w), (q2, _)) = concat [q0, q1, q2, vals, [w]]
+    gen (q0, q1, q2)= take 3 (iterate rotate ((toList q0, 0), (toList q1, lineWidth), (toList q2, 0)))
+    xs = zipWith (\p1 p2 -> (p2, p0, p1)) vs (tail . cycle $ vs)
+    vertices = concat . map (concat . map format . gen) $ xs
     FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
     c0 = V2 r g
     c1 = V2 b a
     toV (V2 x y) = GL.Vertex2 x y
 
 circleDivision :: Int
-circleDivision = 20
+circleDivision = 36
 
 circleVertices :: [V2 Float]
 circleVertices = vertices
@@ -107,12 +119,7 @@ circleVertices = vertices
     cosa = cos da
     sina = sin da
     rmat = V2 (V2 cosa (-sina)) (V2 sina cosa)
-    vertices = (V2 0 0 :) . take division $ iterate (rmat !*) (V2 0 1)
-
-appendDrawing :: Drawing -> (GL.GLuint, [GL.Vertex2 GL.GLfloat], [GL.GLuint]) -> (GL.GLuint, [GL.Vertex2 GL.GLfloat], [GL.GLuint])
-appendDrawing drawing (i, vs0, is0) = (i + fromIntegral (length is), vs0 ++ vs, is0 ++ is)
-    where
-    (vs, is) = convertDrawing i drawing
+    vertices = take division $ iterate (rmat !*) (V2 0 1)
 
 allocateRenderInfo
     :: RenderResource
@@ -120,11 +127,11 @@ allocateRenderInfo
     -> ResourceT IO RenderInfo
 allocateRenderInfo resource drawings = do
     (_, vertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
-    (_, indexBuffer) <- Resource.allocate (mkBuffer GL.ElementArrayBuffer is) GL.deleteObjectName
-    return $ RenderInfo program [positionAttrib, colorAttrib] [] GL.Triangles vertexBuffer indexBuffer 0 (fromIntegral num)
+    return $ RenderInfo program attribs [] GL.Triangles vertexBuffer 0 num
     where
-    SimpleProgram program positionAttrib colorAttrib = rrSimpleProgram resource
-    (num, vs, is) = foldr appendDrawing (0, [], []) $ drawings
+    ProgramInfo program attribs = rrProgramInfo resource
+    vs = concat . map convertDrawing $ drawings
+    num = fromIntegral $ length vs `div` (fromIntegral . sum . map aiNumArrayIndices $ attribs)
     mkBuffer bufferType xs = do
         let n = length xs
             size = fromIntegral $ n * sizeOf (head xs)
@@ -140,37 +147,42 @@ renderInternal info = do
     GL.currentProgram GL.$= Just program
     mapM_ (bindAttrib program) attribs
     mapM_ (bindUniform program) uniforms
-    GL.drawElements mode num GL.UnsignedInt Ptr.nullPtr
+    GL.drawArrays mode (fromIntegral index) (fromIntegral num)
 
     where
-    RenderInfo program attribs uniforms mode vertexBuffer indexBuffer index num = info
+    RenderInfo program attribs uniforms mode vertexBuffer index num = info
 
-data SimpleProgram = SimpleProgram
-    { spProgram :: !GL.Program
-    , spPositionAttrib :: !AttribInfo
-    , spColorAttrib :: !AttribInfo
+data ProgramInfo = ProgramInfo
+    { piProgram :: !GL.Program
+    , piAttribs :: ![AttribInfo]
     } deriving (Show, Eq)
 
-allocateSimpleProgram :: ResourceT IO SimpleProgram
+allocateSimpleProgram :: ResourceT IO ProgramInfo
 allocateSimpleProgram = do
     vertexShader <- allocateShader GL.VertexShader $(embedFile "shader/vertex.glsl")
     fragmentShader <- allocateShader GL.FragmentShader $(embedFile "shader/fragment.glsl")
     program <- allocateProgram [vertexShader, fragmentShader]
 
     liftIO $ do
-        GL.attribLocation program "position" GL.$= positionAttribLocation
-        let positionAttrib = AttribInfo positionAttribLocation GL.Float 2 stride 0
+        attribs <- mapM (allocateAttrib program) attribParams
+        return $ ProgramInfo program attribs
 
-        GL.attribLocation program "color" GL.$= colorAttribLocation
-        let colorAttrib = AttribInfo colorAttribLocation GL.Float 4 stride colorOffset
-
-        return $ SimpleProgram program positionAttrib colorAttrib
 
     where
-    positionAttribLocation = GL.AttribLocation 0
-    colorAttribLocation = GL.AttribLocation 1
-    stride = fromIntegral $ 6 * sizeOf (undefined :: GL.GLfloat)
-    colorOffset = 2 * sizeOf (undefined :: GL.GLfloat)
+    attribParams =
+        [ ("prevPosition", GL.AttribLocation 0, 2, 0)
+        , ("position", GL.AttribLocation 1, 2, 2 * sizeOfFloat)
+        , ("nextPosition", GL.AttribLocation 2, 2, 4 * sizeOfFloat)
+        , ("color", GL.AttribLocation 3, 4, 6 * sizeOfFloat)
+        , ("lineColor", GL.AttribLocation 4, 4, 10 * sizeOfFloat)
+        , ("lineWidth", GL.AttribLocation 5, 1, 14 * sizeOfFloat)
+        ]
+    allocateAttrib program (attribName, location, size, offset) = do
+        GL.attribLocation program attribName GL.$= location
+        return $ AttribInfo location GL.Float size stride offset
+
+    stride = fromIntegral $ 15 * sizeOfFloat
+    sizeOfFloat = sizeOf (undefined :: GL.GLfloat)
 
 allocateRenderResource :: ResourceT IO RenderResource
 allocateRenderResource = fmap RenderResource allocateSimpleProgram
