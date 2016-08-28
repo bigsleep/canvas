@@ -16,14 +16,14 @@ main = do
     let width  = 640
         height = 480
 
-        lineColor = V4 1 0 0 1
+        lineColor = V4 0 0 0 1
         fillColor = V4 0 1 0 1
 
-        lineStyle = LineStyle lineColor 2
+        lineStyle = LineStyle lineColor 0.01
         fillStyle = FillStyle fillColor
         style = (ShapeStyle lineStyle fillStyle)
 
-        divCount = 10
+        divCount = 1
         dl = 1 / fromIntegral divCount
 
         drawings = do
@@ -31,9 +31,9 @@ main = do
             j <- [0..(divCount - 1)]
             let x0 = fromIntegral i * dl
                 y0 = fromIntegral j * dl
-                r = 255
+                r = 1.0
                 rectangle = Rectangle (V2 x0 y0) (0.5 * dl) (0.5 * dl)
-                style = ShapeStyle (LineStyle (V4 0 0 0 1) 2) (FillStyle $ V4 r 0 0 255)
+                style = ShapeStyle lineStyle (FillStyle $ V4 r 0 0 1.0)
             return $ ShapeDrawing style [] rectangle
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings
