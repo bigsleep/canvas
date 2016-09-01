@@ -8,7 +8,7 @@ in vec4 lineColor;
 in float lineWidth;
 varying vec2 fragPosition;
 out vec2 fragCenter;
-out vec2 fragRadius;
+out float fragRadius;
 out vec4 fragColor;
 out vec4 fragLineColor;
 out float fragLineWidth;

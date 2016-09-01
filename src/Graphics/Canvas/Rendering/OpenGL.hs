@@ -94,22 +94,22 @@ convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = vertices
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
-    vals = toList fillColor ++ toList lineColor
+    vals = toList p0 ++ [radius] ++ toList fillColor ++ toList lineColor ++ [lineWidth]
     V2 x y = p0
-    m = V2 (V3 radius 0 x)
-           (V3 0 radius y)
+    r' = radius / sin (pi / 3)
+    m = V2 (V3 r' 0 x)
+           (V3 0 r' y)
     vs = map (\(V2 px py) -> m !* V3 px py 1)$ circleVertices
-    format ((q0, _), (q1, w), (q2, _)) = concat [q0, q1, q2, vals, [w]]
-    gen (q0, q1, q2)= take 3 (iterate rotate ((toList q0, 0), (toList q1, lineWidth), (toList q2, 0)))
-    xs = zipWith (\p1 p2 -> (p2, p0, p1)) vs (tail . cycle $ vs)
-    vertices = concat . map (concat . map format . gen) $ xs
+    format (V2 qx qy) = qx : qy : vals
+    xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
+    vertices = concat . map (concat . map format) $ xs
     FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
     c0 = V2 r g
     c1 = V2 b a
     toV (V2 x y) = GL.Vertex2 x y
 
 circleDivision :: Int
-circleDivision = 36
+circleDivision = 6
 
 circleVertices :: [V2 Float]
 circleVertices = vertices
@@ -144,6 +144,8 @@ renderInternal
     :: RenderInfo
     -> IO ()
 renderInternal info = do
+    GL.blend GL.$= GL.Enabled
+    GL.blendFunc GL.$= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
     GL.currentProgram GL.$= Just program
     mapM_ (bindAttrib program) attribs
     mapM_ (bindUniform program) uniforms
@@ -185,7 +187,35 @@ allocateSimpleProgram = do
     sizeOfFloat = sizeOf (undefined :: GL.GLfloat)
 
 allocateRenderResource :: ResourceT IO RenderResource
-allocateRenderResource = fmap RenderResource allocateSimpleProgram
+allocateRenderResource = fmap RenderResource allocateCircleProgram
+
+
+allocateCircleProgram :: ResourceT IO ProgramInfo
+allocateCircleProgram = do
+    vertexShader <- allocateShader GL.VertexShader $(embedFile "shader/circle-vertex.glsl")
+    fragmentShader <- allocateShader GL.FragmentShader $(embedFile "shader/circle-fragment.glsl")
+    program <- allocateProgram [vertexShader, fragmentShader]
+
+    liftIO $ do
+        attribs <- mapM (allocateAttrib program) attribParams
+        return $ ProgramInfo program attribs
+
+    where
+    attribParams =
+        [ ("position", GL.AttribLocation 0, 2, 0)
+        , ("center", GL.AttribLocation 1, 2, 2 * sizeOfFloat)
+        , ("radius", GL.AttribLocation 2, 1, 4 * sizeOfFloat)
+        , ("color", GL.AttribLocation 3, 4, 5 * sizeOfFloat)
+        , ("lineColor", GL.AttribLocation 4, 4, 9 * sizeOfFloat)
+        , ("lineWidth", GL.AttribLocation 5, 1, 13 * sizeOfFloat)
+        ]
+    allocateAttrib program (attribName, location, size, offset) = do
+        GL.attribLocation program attribName GL.$= location
+        return $ AttribInfo location GL.Float size stride offset
+
+    stride = fromIntegral $ 14 * sizeOfFloat
+    sizeOfFloat = sizeOf (undefined :: GL.GLfloat)
+
 
 bindAttrib :: GL.Program -> AttribInfo -> IO ()
 bindAttrib program vai = do

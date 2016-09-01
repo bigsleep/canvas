@@ -2,7 +2,7 @@
 
 varying vec2 fragPosition;
 in vec2 fragCenter;
-in vec2 fragRadius;
+in float fragRadius;
 in vec4 fragColor;
 in vec4 fragLineColor;
 in float fragLineWidth;
@@ -13,12 +13,12 @@ const vec4 outsideColor = vec4(0.0, 0.0, 0.0, 0.0);
 void main()
 {
     float distance = length(fragPosition - fragCenter);
-    float rr = fragRadius * fragRadius;
+    float innerRadius = fragRadius - fragLineWidth;
 
-    if (distance <= (fragRadius - fragLineWidth)) {
-        outColor = fragColor
+    if (distance <= innerRadius) {
+        outColor = fragColor;
     } else if (distance <= fragRadius) {
-        outColor = fragLineColor
+        outColor = fragLineColor;
     } else {
         outColor = outsideColor;
     }
