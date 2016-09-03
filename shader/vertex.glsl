@@ -5,7 +5,7 @@ in vec2 position;
 in vec2 nextPosition;
 in vec4 color;
 in vec4 lineColor;
-in float lineWidth;
+in vec3 lineWidth;
 out vec4 fragmentColor;
 out vec4 fragmentLineColor;
 varying vec3 sideAttrib;
@@ -30,17 +30,18 @@ void main()
     fragmentColor = color;
     fragmentLineColor = lineColor;
 
-    if (lineWidth < epsilon) {
-        sideAttrib = vec3(0.0, 0.0, 0.0);
-        sideAttrib[gl_VertexID % 3] = -big;
-    } else {
+    sideAttrib = vec3(0.0, 0.0, 0.0);
+    for (int i = 0; i < 3; i++) {
+        if (lineWidth[i] < epsilon) {
+            sideAttrib[(gl_VertexID + 2 + i) % 3] = -big;
+        }
+    }
+    if (lineWidth[1] >= epsilon) {
         float sideDistance = distanceOfPointToLine(position, nextPosition, prevPosition);
-        if (sideDistance <= lineWidth) {
-            sideAttrib = vec3(0.0, 0.0, 0.0);
+        if (sideDistance <= lineWidth[1]) {
             sideAttrib[gl_VertexID % 3] = big;
         } else {
-            float a = sideDistance / lineWidth;
-            sideAttrib = vec3(0.0, 0.0, 0.0);
+            float a = sideDistance / lineWidth[1];
             sideAttrib[gl_VertexID % 3] = a;
         }
     }

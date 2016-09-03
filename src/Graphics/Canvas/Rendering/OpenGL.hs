@@ -83,7 +83,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroup
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
     vs = take 3 $ iterate rotate (toList p0, toList p1, toList p2)
-    otherVals = toList fillColor ++ toList lineColor ++ [lineWidth]
+    otherVals = toList fillColor ++ toList lineColor ++ [lineWidth, lineWidth, lineWidth]
     format (q0, q1, q2) = concat [q0, q1, q2, otherVals]
     vertices = concat . map format $ vs
 
@@ -96,7 +96,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = Ver
     p1 = V2 (x + width) y
     p2 = V2 (x + width) (y + height)
     p3 = V2 x (y + height)
-    format ((q0, _), (q1, w), (q2, _)) = concat [q0, q1, q2, vals, [w]]
+    format ((q0, w0), (q1, w1), (q2, w2)) = concat [q0, q1, q2, vals, [w0, w1, w2]]
     gen (q0, q1, q2)= take 3 (iterate rotate ((toList q0, lineWidth), (toList q1, lineWidth), (toList q2, 0)))
     vs = gen (p2, p0, p1) ++ gen (p0, p2, p3)
     vertices = concat . map format $ vs
@@ -197,13 +197,13 @@ allocateTriangleProgram = do
         , ("nextPosition", GL.AttribLocation 2, 2, 4 * sizeOfFloat)
         , ("color", GL.AttribLocation 3, 4, 6 * sizeOfFloat)
         , ("lineColor", GL.AttribLocation 4, 4, 10 * sizeOfFloat)
-        , ("lineWidth", GL.AttribLocation 5, 1, 14 * sizeOfFloat)
+        , ("lineWidth", GL.AttribLocation 5, 3, 14 * sizeOfFloat)
         ]
     allocateAttrib program (attribName, location, size, offset) = do
         GL.attribLocation program attribName GL.$= location
         return $ AttribInfo location GL.Float size stride offset
 
-    stride = fromIntegral $ 15 * sizeOfFloat
+    stride = fromIntegral $ 17 * sizeOfFloat
     sizeOfFloat = sizeOf (undefined :: GL.GLfloat)
 
 allocateRenderResource :: ResourceT IO RenderResource
