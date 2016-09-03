@@ -181,8 +181,8 @@ data ProgramInfo = ProgramInfo
 
 allocateTriangleProgram :: ResourceT IO ProgramInfo
 allocateTriangleProgram = do
-    vertexShader <- allocateShader GL.VertexShader $(embedFile "shader/vertex.glsl")
-    fragmentShader <- allocateShader GL.FragmentShader $(embedFile "shader/fragment.glsl")
+    vertexShader <- allocateShader GL.VertexShader $(embedFile "shader/triangle-vertex.glsl")
+    fragmentShader <- allocateShader GL.FragmentShader $(embedFile "shader/triangle-fragment.glsl")
     program <- allocateProgram [vertexShader, fragmentShader]
 
     liftIO $ do
