@@ -44,9 +44,7 @@ data AttribInfo = AttribInfo
     } deriving (Show, Eq)
 
 data RenderInfo = RenderInfo
-    { riProgram :: !GL.Program
-    , riAttribs :: ![AttribInfo]
-    , riUniforms :: ![UniformInfo]
+    { riProgram :: ProgramInfo
     , riMode :: !GL.PrimitiveMode
     , riVertexBuffer :: !GL.BufferObject
     , riIndex :: !GL.ArrayIndex
@@ -54,20 +52,33 @@ data RenderInfo = RenderInfo
     } deriving (Show)
 
 data RenderResource = RenderResource
-    { rrProgramInfo :: ProgramInfo
+    { rrTriangleProgramInfo :: ProgramInfo
+    , rrCircleProgramInfo :: ProgramInfo
     } deriving (Show)
+
+data VertexGroups = VertexGroups
+    { vgTriangleVertices :: [GL.GLfloat]
+    , vgCircleVertices :: [GL.GLfloat]
+    }
+
+instance Monoid VertexGroups where
+    mappend (VertexGroups tvs cvs) (VertexGroups tvs' cvs') = VertexGroups (tvs ++ tvs') (cvs ++ cvs')
+    mempty = VertexGroups [] []
 
 render :: RenderResource -> Canvas -> IO ()
 render resource (Canvas o w h drawings) =
-    Resource.runResourceT $
-        allocateRenderInfo resource drawings >>=
-        liftIO . renderInternal
+    Resource.runResourceT $ do
+        rs <- allocateRenderInfo resource drawings
+        liftIO $ do
+            GL.blend GL.$= GL.Enabled
+            GL.blendFunc GL.$= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
+            mapM_ renderInternal rs
 
 rotate :: (a, a, a) -> (a, a, a)
 rotate (q0, q1, q2) = (q1, q2, q0)
 
-convertDrawing :: Drawing -> [GL.GLfloat]
-convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = vertices
+convertDrawing :: Drawing -> VertexGroups
+convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroups vertices []
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
@@ -76,7 +87,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = vertices
     format (q0, q1, q2) = concat [q0, q1, q2, otherVals]
     vertices = concat . map format $ vs
 
-convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = vertices
+convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = VertexGroups vertices []
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
@@ -90,7 +101,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = ver
     vs = gen (p2, p0, p1) ++ gen (p0, p2, p3)
     vertices = concat . map format $ vs
 
-convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = vertices
+convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups [] vertices
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
@@ -124,50 +135,59 @@ circleVertices = vertices
 allocateRenderInfo
     :: RenderResource
     -> [Drawing]
-    -> ResourceT IO RenderInfo
+    -> ResourceT IO [RenderInfo]
 allocateRenderInfo resource drawings = do
-    (_, vertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
-    return $ RenderInfo program attribs [] GL.Triangles vertexBuffer 0 num
+    (_, triangleVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer tvs) GL.deleteObjectName
+    (_, circleVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer cvs) GL.deleteObjectName
+    return $ [ RenderInfo triangleSource GL.Triangles triangleVertexBuffer 0 tnum
+             , RenderInfo circleSource GL.Triangles circleVertexBuffer 0 cnum
+             ]
     where
-    ProgramInfo program attribs = rrProgramInfo resource
-    vs = concat . map convertDrawing $ drawings
-    num = fromIntegral $ length vs `div` (fromIntegral . sum . map aiNumArrayIndices $ attribs)
-    mkBuffer bufferType xs = do
+    RenderResource triangleSource circleSource = resource
+    VertexGroups tvs cvs = fold . map convertDrawing $ drawings
+    tnum = fromIntegral $ length tvs `div` attribNum (piAttribs triangleSource)
+    cnum = fromIntegral $ length cvs `div` attribNum (piAttribs circleSource)
+    mkBuffer bufferTarget xs = do
         let n = length xs
             size = fromIntegral $ n * sizeOf (head xs)
         buffer <- GL.genObjectName
-        GL.bindBuffer bufferType GL.$= Just buffer
-        withArray xs $ \ptr -> GL.bufferData bufferType GL.$= (size, ptr, GL.StreamDraw)
+        GL.bindBuffer bufferTarget GL.$= Just buffer
+        withArray xs $ \ptr -> GL.bufferData bufferTarget GL.$= (size, ptr, GL.StreamDraw)
+        GL.bindBuffer bufferTarget GL.$= Nothing
         return buffer
+    attribNum = fromIntegral . sum . map aiNumArrayIndices
 
 renderInternal
     :: RenderInfo
     -> IO ()
 renderInternal info = do
-    GL.blend GL.$= GL.Enabled
-    GL.blendFunc GL.$= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
     GL.currentProgram GL.$= Just program
+    GL.bindBuffer GL.ArrayBuffer GL.$= Just vertexBuffer
     mapM_ (bindAttrib program) attribs
     mapM_ (bindUniform program) uniforms
     GL.drawArrays mode (fromIntegral index) (fromIntegral num)
+    GL.bindBuffer GL.ArrayBuffer GL.$= Nothing
+    mapM_ (unbindAttrib program) attribs
 
     where
-    RenderInfo program attribs uniforms mode vertexBuffer index num = info
+    RenderInfo programInfo mode vertexBuffer index num = info
+    ProgramInfo program attribs uniforms = programInfo
 
 data ProgramInfo = ProgramInfo
     { piProgram :: !GL.Program
     , piAttribs :: ![AttribInfo]
-    } deriving (Show, Eq)
+    , piUniforms :: ![UniformInfo]
+    } deriving (Show)
 
-allocateSimpleProgram :: ResourceT IO ProgramInfo
-allocateSimpleProgram = do
+allocateTriangleProgram :: ResourceT IO ProgramInfo
+allocateTriangleProgram = do
     vertexShader <- allocateShader GL.VertexShader $(embedFile "shader/vertex.glsl")
     fragmentShader <- allocateShader GL.FragmentShader $(embedFile "shader/fragment.glsl")
     program <- allocateProgram [vertexShader, fragmentShader]
 
     liftIO $ do
         attribs <- mapM (allocateAttrib program) attribParams
-        return $ ProgramInfo program attribs
+        return $ ProgramInfo program attribs []
 
 
     where
@@ -187,7 +207,10 @@ allocateSimpleProgram = do
     sizeOfFloat = sizeOf (undefined :: GL.GLfloat)
 
 allocateRenderResource :: ResourceT IO RenderResource
-allocateRenderResource = fmap RenderResource allocateCircleProgram
+allocateRenderResource = do
+    triangleProgram <- allocateTriangleProgram
+    circleProgram <- allocateCircleProgram
+    return (RenderResource triangleProgram circleProgram)
 
 
 allocateCircleProgram :: ResourceT IO ProgramInfo
@@ -198,7 +221,7 @@ allocateCircleProgram = do
 
     liftIO $ do
         attribs <- mapM (allocateAttrib program) attribParams
-        return $ ProgramInfo program attribs
+        return $ ProgramInfo program attribs []
 
     where
     attribParams =
@@ -227,6 +250,11 @@ bindAttrib program vai = do
     ptrOffset = Ptr.nullPtr `Ptr.plusPtr` offset
     vad = GL.VertexArrayDescriptor num dataType stride ptrOffset
 
+unbindAttrib :: GL.Program -> AttribInfo -> IO ()
+unbindAttrib program vai = do
+    GL.vertexAttribArray attribLocation GL.$= GL.Disabled
+    where
+    AttribInfo attribLocation _ _ _ _  = vai
 
 bindUniform :: GL.Program -> UniformInfo -> IO ()
 bindUniform program (UniformInfo (UniformLocation _ l) u) =

@@ -23,7 +23,7 @@ main = do
         fillStyle = FillStyle fillColor
         style = (ShapeStyle lineStyle fillStyle)
 
-        divCount = 1
+        divCount = 4
         dl = 1 / fromIntegral divCount
         radius = dl * 0.2
 
