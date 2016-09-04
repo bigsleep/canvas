@@ -21,14 +21,15 @@ import Control.Monad.Trans.Resource (ResourceT(..))
 import qualified Control.Monad.Trans.Resource as Resource (allocate, runResourceT)
 import qualified Data.ByteString as BS
 import Data.FileEmbed (embedFile)
-import Data.Foldable (Foldable(..))
+import Data.Fixed (div', mod')
+import Data.Foldable (Foldable(..), foldrM)
 import Data.Proxy (Proxy(..))
 import Foreign.Marshal.Array (withArray)
 import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (sizeOf)
 import Graphics.Canvas.Types
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V2(..), V3(..), V4(..), (!*), ortho, lookAt)
+import Linear (V2(..), V3(..), V4(..), M22(..), (!*), ortho, lookAt)
 
 data UniformInfo = forall a. (GL.Uniform a, Show a) => UniformInfo !GL.UniformLocation !a
 deriving instance Show UniformInfo
@@ -36,8 +37,8 @@ deriving instance Show UniformInfo
 data AttribInfo = AttribInfo
     { aiAttribLocation :: !GL.AttribLocation
     , aiDataType :: !GL.DataType
-    , aiNumArrayIndices :: !GL.NumArrayIndices
-    , aiStride :: !GL.Stride
+    , aiNumArrayIndices :: !Int
+    , aiStride :: !Int
     , aiOffset :: !Int
     } deriving (Show, Eq)
 
@@ -48,7 +49,7 @@ data ProgramInfo = ProgramInfo
     } deriving (Show)
 
 data RenderInfo = RenderInfo
-    { riProgram :: ProgramInfo
+    { riProgram :: !ProgramInfo
     , riMode :: !GL.PrimitiveMode
     , riVertexBuffer :: !GL.BufferObject
     , riIndex :: !GL.ArrayIndex
@@ -56,24 +57,31 @@ data RenderInfo = RenderInfo
     } deriving (Show)
 
 data RenderResource = RenderResource
-    { rrTriangleProgramInfo :: ProgramInfo
-    , rrCircleProgramInfo :: ProgramInfo
+    { rrTriangleProgramInfo :: !ProgramInfo
+    , rrCircleProgramInfo :: !ProgramInfo
+    , rrArcProgramInfo :: !ProgramInfo
     } deriving (Show)
 
 data VertexGroups = VertexGroups
-    { vgTriangleVertices :: [GL.GLfloat]
-    , vgCircleVertices :: [GL.GLfloat]
-    }
+    { vgTriangleVertices :: ![GL.GLfloat]
+    , vgCircleVertices :: ![GL.GLfloat]
+    , vgArcVertices :: ![GL.GLfloat]
+    } deriving (Show)
+
+data AttribParams = AttribParams
+    { apName :: !String
+    , apSize :: !Int
+    } deriving (Show)
 
 instance Monoid VertexGroups where
-    mappend (VertexGroups tvs cvs) (VertexGroups tvs' cvs') = VertexGroups (tvs ++ tvs') (cvs ++ cvs')
-    mempty = VertexGroups [] []
+    mappend (VertexGroups as bs cs) (VertexGroups as' bs' cs') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs')
+    mempty = VertexGroups [] [] []
 
 rotate :: (a, a, a) -> (a, a, a)
 rotate (q0, q1, q2) = (q1, q2, q0)
 
 convertDrawing :: Drawing -> VertexGroups
-convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroups vertices []
+convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroups vertices [] []
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
@@ -82,7 +90,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroup
     format (q0, q1, q2) = concat [q0, q1, q2, otherVals]
     vertices = concatMap format $ vs
 
-convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = VertexGroups vertices []
+convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = VertexGroups vertices [] []
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
@@ -96,7 +104,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = Ver
     vs = gen (p2, p0, p1) ++ gen (p0, p2, p3)
     vertices = concatMap format $ vs
 
-convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups [] vertices
+convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups [] vertices []
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
@@ -109,10 +117,19 @@ convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups
     format (V2 qx qy) = qx : qy : vals
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = concatMap (concatMap format) $ xs
-    FillStyle (V4 r g b a) = shapeStyleFillStyle shapeStyle
-    c0 = V2 r g
-    c1 = V2 b a
-    toV (V2 x y) = GL.Vertex2 x y
+
+convertDrawing (PathDrawing lineStyle trans (Arc p0 radius startAngle endAngle)) = VertexGroups [] [] vertices
+    where
+    LineStyle lineColor lineWidth = lineStyle
+    vals = toList p0 ++ [radius] ++ toList lineColor ++ [lineWidth, startAngle, endAngle]
+    V2 x y = p0
+    r' = radius / sin (pi / 3)
+    m = V2 (V3 r' 0 x)
+           (V3 0 r' y)
+    vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
+    format (V2 qx qy) = qx : qy : vals
+    xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
+    vertices = concatMap (concatMap format) $ xs
 
 circleDivision :: Int
 circleDivision = 6
@@ -122,9 +139,7 @@ circleVertices = vertices
     where
     division = circleDivision
     da = 2 * pi / fromIntegral division :: Float
-    cosa = cos da
-    sina = sin da
-    rmat = V2 (V2 cosa (-sina)) (V2 sina cosa)
+    rmat = rotateMatrix da
     vertices = take division $ iterate (rmat !*) (V2 0 1)
 
 allocateRenderInfo
@@ -134,14 +149,17 @@ allocateRenderInfo
 allocateRenderInfo resource drawings = do
     (_, triangleVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer tvs) GL.deleteObjectName
     (_, circleVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer cvs) GL.deleteObjectName
+    (_, arcVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer avs) GL.deleteObjectName
     return [ RenderInfo triangleSource GL.Triangles triangleVertexBuffer 0 tnum
            , RenderInfo circleSource GL.Triangles circleVertexBuffer 0 cnum
+           , RenderInfo arcSource GL.Triangles arcVertexBuffer 0 anum
            ]
     where
-    RenderResource triangleSource circleSource = resource
-    VertexGroups tvs cvs = fold . map convertDrawing $ drawings
+    RenderResource triangleSource circleSource arcSource = resource
+    VertexGroups tvs cvs avs = fold . map convertDrawing $ drawings
     tnum = fromIntegral $ length tvs `div` attribNum (piAttribs triangleSource)
     cnum = fromIntegral $ length cvs `div` attribNum (piAttribs circleSource)
+    anum = fromIntegral $ length avs `div` attribNum (piAttribs arcSource)
     mkBuffer bufferTarget xs = do
         let n = length xs
             size = fromIntegral $ n * sizeOf (head xs)
@@ -189,71 +207,95 @@ allocateRenderResource :: ResourceT IO RenderResource
 allocateRenderResource = do
     triangleProgram <- allocateTriangleProgram
     circleProgram <- allocateCircleProgram
-    return (RenderResource triangleProgram circleProgram)
+    arcProgram <- allocateArcProgram
+    return (RenderResource triangleProgram circleProgram arcProgram)
+
+allocateProgramInfo
+    :: BS.ByteString
+    -> BS.ByteString
+    -> [AttribParams]
+    -> [String]
+    -> ResourceT IO ProgramInfo
+allocateProgramInfo vertexShaderCode fragmentShaderCode attribParams uniformNames = do
+    vertexShader <- allocateShader GL.VertexShader vertexShaderCode
+    fragmentShader <- allocateShader GL.FragmentShader fragmentShaderCode
+    program <- allocateProgram [vertexShader, fragmentShader]
+
+    liftIO $ do
+        (_, attribs) <- foldrM (allocateAttrib program stride) (stride, []) ([0..] `zip` attribParams)
+        uniforms <- mapM (GL.uniformLocation program) uniformNames
+        return $ ProgramInfo program attribs uniforms
+    where
+    stride = floatSize * sum (map apSize attribParams)
+    allocateAttrib program stride (i, AttribParams attribName size) (offset, xs) = do
+        let offset' = offset - size * floatSize
+        GL.attribLocation program attribName GL.$= GL.AttribLocation i
+        return $ (offset', AttribInfo (GL.AttribLocation i) GL.Float size stride offset' : xs)
+    floatSize = sizeOf (undefined :: Float)
 
 allocateTriangleProgram :: ResourceT IO ProgramInfo
-allocateTriangleProgram = do
-    vertexShader <- allocateShader GL.VertexShader $(embedFile "shader/triangle-vertex.glsl")
-    fragmentShader <- allocateShader GL.FragmentShader $(embedFile "shader/triangle-fragment.glsl")
-    program <- allocateProgram [vertexShader, fragmentShader]
-
-    liftIO $ do
-        attribs <- mapM (allocateAttrib program) attribParams
-        uniforms <- mapM (GL.uniformLocation program) uniformNames
-        return $ ProgramInfo program attribs uniforms
-
+allocateTriangleProgram = allocateProgramInfo
+    $(embedFile "shader/triangle-vertex.glsl")
+    $(embedFile "shader/triangle-fragment.glsl")
+    attribParams
+    uniformNames
 
     where
     attribParams =
-        [ ("prevPosition", GL.AttribLocation 0, 2, 0)
-        , ("position", GL.AttribLocation 1, 2, 2 * sizeOfFloat)
-        , ("nextPosition", GL.AttribLocation 2, 2, 4 * sizeOfFloat)
-        , ("color", GL.AttribLocation 3, 4, 6 * sizeOfFloat)
-        , ("lineColor", GL.AttribLocation 4, 4, 10 * sizeOfFloat)
-        , ("lineWidth", GL.AttribLocation 5, 3, 14 * sizeOfFloat)
+        [ AttribParams "prevPosition" 2
+        , AttribParams "position" 2
+        , AttribParams "nextPosition" 2
+        , AttribParams "color" 4
+        , AttribParams "lineColor" 4
+        , AttribParams "lineWidth" 3
         ]
     uniformNames =
         [ "projectionMatrix"
         , "modelViewMatrix"
         ]
-    allocateAttrib program (attribName, location, size, offset) = do
-        GL.attribLocation program attribName GL.$= location
-        return $ AttribInfo location GL.Float size stride offset
-
-    stride = fromIntegral $ 17 * sizeOfFloat
-    sizeOfFloat = sizeOf (undefined :: GL.GLfloat)
 
 allocateCircleProgram :: ResourceT IO ProgramInfo
-allocateCircleProgram = do
-    vertexShader <- allocateShader GL.VertexShader $(embedFile "shader/circle-vertex.glsl")
-    fragmentShader <- allocateShader GL.FragmentShader $(embedFile "shader/circle-fragment.glsl")
-    program <- allocateProgram [vertexShader, fragmentShader]
-
-    liftIO $ do
-        attribs <- mapM (allocateAttrib program) attribParams
-        uniforms <- mapM (GL.uniformLocation program) uniformNames
-        return $ ProgramInfo program attribs uniforms
+allocateCircleProgram = allocateProgramInfo
+    $(embedFile "shader/circle-vertex.glsl")
+    $(embedFile "shader/circle-fragment.glsl")
+    attribParams
+    uniformNames
 
     where
     attribParams =
-        [ ("position", GL.AttribLocation 0, 2, 0)
-        , ("center", GL.AttribLocation 1, 2, 2 * sizeOfFloat)
-        , ("radius", GL.AttribLocation 2, 1, 4 * sizeOfFloat)
-        , ("color", GL.AttribLocation 3, 4, 5 * sizeOfFloat)
-        , ("lineColor", GL.AttribLocation 4, 4, 9 * sizeOfFloat)
-        , ("lineWidth", GL.AttribLocation 5, 1, 13 * sizeOfFloat)
+        [ AttribParams "position" 2
+        , AttribParams "center" 2
+        , AttribParams "radius" 1
+        , AttribParams "color" 4
+        , AttribParams "lineColor" 4
+        , AttribParams "lineWidth" 1
         ]
     uniformNames =
         [ "projectionMatrix"
         , "modelViewMatrix"
         ]
-    allocateAttrib program (attribName, location, size, offset) = do
-        GL.attribLocation program attribName GL.$= location
-        return $ AttribInfo location GL.Float size stride offset
 
-    stride = fromIntegral $ 14 * sizeOfFloat
-    sizeOfFloat = sizeOf (undefined :: GL.GLfloat)
+allocateArcProgram :: ResourceT IO ProgramInfo
+allocateArcProgram = allocateProgramInfo
+    $(embedFile "shader/arc-vertex.glsl")
+    $(embedFile "shader/arc-fragment.glsl")
+    attribParams
+    uniformNames
 
+    where
+    attribParams =
+        [ AttribParams "position" 2
+        , AttribParams "center" 2
+        , AttribParams "radius" 1
+        , AttribParams "lineColor" 4
+        , AttribParams "lineWidth" 1
+        , AttribParams "startAngle" 1
+        , AttribParams "endAngle" 1
+        ]
+    uniformNames =
+        [ "projectionMatrix"
+        , "modelViewMatrix"
+        ]
 
 bindAttrib :: GL.Program -> AttribInfo -> IO ()
 bindAttrib program vai = do
@@ -263,7 +305,7 @@ bindAttrib program vai = do
     AttribInfo attribLocation dataType num stride offset = vai
     GL.AttribLocation location = attribLocation
     ptrOffset = Ptr.nullPtr `Ptr.plusPtr` offset
-    vad = GL.VertexArrayDescriptor num dataType stride ptrOffset
+    vad = GL.VertexArrayDescriptor (fromIntegral num) dataType (fromIntegral stride) ptrOffset
 
 unbindAttrib :: GL.Program -> AttribInfo -> IO ()
 unbindAttrib program vai =
@@ -314,3 +356,10 @@ checkStatus getStatus getInfoLog message object = do
     unless ok $ do
         log <- GL.get . getInfoLog $ object
         throwIO . userError $ message ++ ": " ++ log
+
+
+rotateMatrix :: Float -> M22 Float
+rotateMatrix a = V2 (V2 cosa (-sina)) (V2 sina cosa)
+    where
+    cosa = cos a
+    sina = sin a

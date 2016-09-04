@@ -62,7 +62,7 @@ type Transforms = [Transform]
 
 data Drawing
     = ShapeDrawing !ShapeStyle !Transforms !Shape
---    | PathDrawing !LineStyle !Transforms !Path
+    | PathDrawing !LineStyle !Transforms !Path
     deriving (Show, Read, Eq)
 
 data Canvas
