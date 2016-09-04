@@ -13,9 +13,12 @@ out vec4 fragColor;
 out vec4 fragLineColor;
 out float fragLineWidth;
 
+uniform mat4 projectionMatrix;
+uniform mat4 modelViewMatrix;
+
 void main()
 {
-    gl_Position = vec4(position, 0.0, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 0.0, 1.0);
     fragPosition = position;
     fragCenter = center;
     fragRadius = radius;

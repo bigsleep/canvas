@@ -17,7 +17,7 @@ main = do
         height = 480
 
         lineColor = V4 0 0.7 0.6 1
-        lineWidth = 0.01
+        lineWidth = 0.8
         fillColor = V4 0 1 0 1
 
         lineStyle = LineStyle lineColor lineWidth
@@ -25,15 +25,16 @@ main = do
         style = (ShapeStyle lineStyle fillStyle)
 
         divCount = 1
-        dl = 1 / fromIntegral divCount
+        dx = fromIntegral width / fromIntegral divCount
+        dy = fromIntegral height / fromIntegral divCount
 
         drawings = do
             i <- [0..(divCount - 1)]
             j <- [0..(divCount - 1)]
-            let x0 = fromIntegral i * dl
-                y0 = fromIntegral j * dl
+            let x0 = fromIntegral i * dx
+                y0 = fromIntegral j * dy
                 r = 1.0
-                triangle = Triangle (V2 x0 y0) (V2 (x0 + dl) y0) (V2 x0 (y0 + dl))
+                triangle = Triangle (V2 x0 y0) (V2 (x0 + dx) y0) (V2 x0 (y0 + dy))
                 style = ShapeStyle lineStyle (FillStyle $ V4 r 0 0 1.0)
             return $ ShapeDrawing style [] triangle
 
@@ -91,8 +92,4 @@ onDisplay (resource, canvas) win = do
 
 resizeWindow :: GLFW.WindowSizeCallback
 resizeWindow win w h =
-    do
-      GL.viewport   GL.$= (GL.Position 0 0, GL.Size (fromIntegral w) (fromIntegral h))
-      GL.matrixMode GL.$= GL.Projection
-      GL.loadIdentity
-      GL.ortho2D 0 (realToFrac w) (realToFrac h) 0
+    GL.viewport   GL.$= (GL.Position 0 0, GL.Size (fromIntegral w) (fromIntegral h))
