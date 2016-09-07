@@ -60,12 +60,14 @@ data RenderResource = RenderResource
     { rrTriangleProgramInfo :: !ProgramInfo
     , rrCircleProgramInfo :: !ProgramInfo
     , rrArcProgramInfo :: !ProgramInfo
+    , rrLineProgramInfo :: !ProgramInfo
     } deriving (Show)
 
 data VertexGroups = VertexGroups
     { vgTriangleVertices :: ![GL.GLfloat]
     , vgCircleVertices :: ![GL.GLfloat]
     , vgArcVertices :: ![GL.GLfloat]
+    , vgLineVertices :: ![GL.GLfloat]
     } deriving (Show)
 
 data AttribParams = AttribParams
@@ -74,14 +76,11 @@ data AttribParams = AttribParams
     } deriving (Show)
 
 instance Monoid VertexGroups where
-    mappend (VertexGroups as bs cs) (VertexGroups as' bs' cs') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs')
-    mempty = VertexGroups [] [] []
-
-rotate :: (a, a, a) -> (a, a, a)
-rotate (q0, q1, q2) = (q1, q2, q0)
+    mappend (VertexGroups as bs cs ds) (VertexGroups as' bs' cs' ds') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs') (ds ++ ds')
+    mempty = VertexGroups [] [] [] []
 
 convertDrawing :: Drawing -> VertexGroups
-convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroups vertices [] []
+convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroups vertices [] [] []
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
@@ -90,7 +89,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroup
     format (q0, q1, q2) = concat [q0, q1, q2, otherVals]
     vertices = concatMap format $ vs
 
-convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = VertexGroups vertices [] []
+convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = VertexGroups vertices [] [] []
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
@@ -104,7 +103,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = Ver
     vs = gen (p2, p0, p1) ++ gen (p0, p2, p3)
     vertices = concatMap format $ vs
 
-convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups [] vertices []
+convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups [] vertices [] []
     where
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
@@ -118,7 +117,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = concatMap (concatMap format) $ xs
 
-convertDrawing (PathDrawing lineStyle trans (Arc p0 radius startAngle endAngle)) = VertexGroups [] [] vertices
+convertDrawing (PathDrawing lineStyle trans (Arc p0 radius startAngle endAngle)) = VertexGroups [] [] vertices []
     where
     LineStyle lineColor lineWidth = lineStyle
     vals = toList p0 ++ [radius] ++ toList lineColor ++ [lineWidth, startAngle, endAngle]
@@ -130,6 +129,21 @@ convertDrawing (PathDrawing lineStyle trans (Arc p0 radius startAngle endAngle))
     format (V2 qx qy) = qx : qy : vals
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = concatMap (concatMap format) $ xs
+
+convertDrawing (PathDrawing lineStyle trans (StripPath (p0:ps))) = VertexGroups [] [] [] vertices
+    where
+    LineStyle lineColor lineWidth = lineStyle
+    vals = toList lineColor ++ [lineWidth]
+    ps' = p0:p0:ps
+    ps'' = ps ++ reverse ps
+    vs = zip3 ps' (p0:ps) ps''
+    segs = zip vs (tail vs)
+    triangulate (a, b) =
+        let a' = reverse' a
+            b' = reverse' b
+        in [a, a', b, a', b', b]
+    format (q0, q1, q2) = toList q0 ++ toList q1 ++ toList q2 ++ vals
+    vertices = concatMap format . concatMap triangulate $ segs
 
 circleDivision :: Int
 circleDivision = 6
@@ -150,16 +164,19 @@ allocateRenderInfo resource drawings = do
     (_, triangleVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer tvs) GL.deleteObjectName
     (_, circleVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer cvs) GL.deleteObjectName
     (_, arcVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer avs) GL.deleteObjectName
+    (_, lineVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer lvs) GL.deleteObjectName
     return [ RenderInfo triangleSource GL.Triangles triangleVertexBuffer 0 tnum
            , RenderInfo circleSource GL.Triangles circleVertexBuffer 0 cnum
            , RenderInfo arcSource GL.Triangles arcVertexBuffer 0 anum
+           , RenderInfo lineSource GL.Triangles lineVertexBuffer 0 lnum
            ]
     where
-    RenderResource triangleSource circleSource arcSource = resource
-    VertexGroups tvs cvs avs = fold . map convertDrawing $ drawings
+    RenderResource triangleSource circleSource arcSource lineSource = resource
+    VertexGroups tvs cvs avs lvs = fold . map convertDrawing $ drawings
     tnum = fromIntegral $ length tvs `div` attribNum (piAttribs triangleSource)
     cnum = fromIntegral $ length cvs `div` attribNum (piAttribs circleSource)
     anum = fromIntegral $ length avs `div` attribNum (piAttribs arcSource)
+    lnum = fromIntegral $ length lvs `div` attribNum (piAttribs lineSource)
     mkBuffer bufferTarget xs = do
         let n = length xs
             size = fromIntegral $ n * sizeOf (head xs)
@@ -208,7 +225,8 @@ allocateRenderResource = do
     triangleProgram <- allocateTriangleProgram
     circleProgram <- allocateCircleProgram
     arcProgram <- allocateArcProgram
-    return (RenderResource triangleProgram circleProgram arcProgram)
+    lineProgram <- allocateLineProgram
+    return (RenderResource triangleProgram circleProgram arcProgram lineProgram)
 
 allocateProgramInfo
     :: BS.ByteString
@@ -297,6 +315,26 @@ allocateArcProgram = allocateProgramInfo
         , "modelViewMatrix"
         ]
 
+allocateLineProgram :: ResourceT IO ProgramInfo
+allocateLineProgram = allocateProgramInfo
+    $(embedFile "shader/line-vertex.glsl")
+    $(embedFile "shader/line-fragment.glsl")
+    attribParams
+    uniformNames
+
+    where
+    attribParams =
+        [ AttribParams "prevPosition" 2
+        , AttribParams "position" 2
+        , AttribParams "nextPosition" 2
+        , AttribParams "lineColor" 4
+        , AttribParams "lineWidth" 1
+        ]
+    uniformNames =
+        [ "projectionMatrix"
+        , "modelViewMatrix"
+        ]
+
 bindAttrib :: GL.Program -> AttribInfo -> IO ()
 bindAttrib program vai = do
     GL.vertexAttribArray attribLocation GL.$= GL.Enabled
@@ -363,3 +401,9 @@ rotateMatrix a = V2 (V2 cosa (-sina)) (V2 sina cosa)
     where
     cosa = cos a
     sina = sin a
+
+rotate :: (a, a, a) -> (a, a, a)
+rotate (q0, q1, q2) = (q1, q2, q0)
+
+reverse' :: (a, a, a) -> (a, a, a)
+reverse' (q0, q1, q2) = (q2, q1, q0)

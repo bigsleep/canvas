@@ -75,3 +75,15 @@ executable arc-sample
                      , transformers
                      , resourcet
   default-language:    Haskell2010
+
+executable strippath-sample
+  hs-source-dirs:      sample
+  main-is:             StripPath.hs
+  build-depends:       base >= 4.7 && < 5
+                     , linear
+                     , OpenGL
+                     , GLFW-b
+                     , canvas
+                     , transformers
+                     , resourcet
+  default-language:    Haskell2010
