@@ -19,7 +19,7 @@ main = do
         lineColor = V4 0 0 0 1
         fillColor = V4 0 1 0 1
 
-        lineStyle = LineStyle lineColor 10
+        lineStyle = LineStyle lineColor 20
         startAngle = pi / 4
         endAngle = 3 * pi / 2
 
@@ -28,7 +28,8 @@ main = do
         dy = fromIntegral height / fromIntegral divCount
         radius = dx * 0.2
 
-        ps = [V2 50 50, V2 100 120, V2 150 10, V2 200 140]
+        ps = [V2 50 150, V2 100 220, V2 150 110, V2 200 240, V2 180 50]
+        --ps = [V2 50 50, V2 50 400, V2 150 50, V2 150 400]
         path = PathDrawing lineStyle [] (StripPath ps)
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) [path]
