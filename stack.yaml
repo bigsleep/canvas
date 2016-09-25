@@ -1,8 +1,7 @@
-resolver: lts-6.17
+resolver: lts-6.18
 packages:
 - '.'
 extra-deps:
-- colors-0.3.0.2
 - extensible-0.3.7
 flags: {}
 extra-package-dbs: []

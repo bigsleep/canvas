@@ -12,25 +12,23 @@ module Graphics.Canvas.Types
     , Canvas(..)
     ) where
 
-import qualified Data.Color (Color, RGBA(..))
-import Data.Word (Word8)
 import Linear (V2, V4(..), M22)
 
 type Coord = V2 Float
 
-type Color = Data.Color.Color Float
+type Color = V4 Float
 
 data Shape
     = Triangle !Coord !Coord !Coord
     | Rectangle !Coord !Float !Float
     | Circle !Coord !Float
-    | RoundRect !Coord !Float !Float !Float
+--    | RoundRect !Coord !Float !Float !Float
     deriving (Show, Read, Eq)
 
 data Path
-    = LoopPath ![Coord]
-    | StripPath ![Coord]
-    | FragmentPath ![Coord]
+    = StripPath ![Coord]
+-- | LoopPath ![Coord]
+-- | FragmentPath ![Coord]
     | Arc !Coord !Float !Float !Float
     deriving (Show, Read, Eq)
 

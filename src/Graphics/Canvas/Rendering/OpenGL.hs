@@ -19,11 +19,10 @@ module Graphics.Canvas.Rendering.OpenGL
 import Control.Exception (throwIO)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Trans.Resource (ResourceT(..))
+import Control.Monad.Trans.Resource (ResourceT)
 import qualified Control.Monad.Trans.Resource as Resource (allocate, runResourceT)
 import qualified Data.ByteString as BS
 import Data.FileEmbed (embedFile)
-import Data.Fixed (div', mod')
 import Data.Foldable (Foldable(..), foldrM)
 import Data.Proxy (Proxy(..))
 import Foreign.Marshal.Array (withArray)
@@ -32,7 +31,7 @@ import Foreign.Storable (Storable(..), sizeOf)
 import Graphics.Canvas.Types
 import Graphics.Canvas.Rendering.OpenGL.Vertex
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V2(..), V3(..), V4(..), M22(..), (!*), ortho, lookAt)
+import Linear (V2(..), V3(..), M22, (!*), ortho, lookAt)
 
 data UniformInfo = forall a. (GL.Uniform a, Show a) => UniformInfo !GL.UniformLocation !a
 deriving instance Show UniformInfo
@@ -46,11 +45,8 @@ data AttribInfo = AttribInfo
     , aiOffset :: !Int
     } deriving (Show, Eq)
 
-data ProgramInfo = ProgramInfo
-    { piProgram :: !GL.Program
-    , piAttribs :: ![AttribInfo]
-    , piUniforms :: ![GL.UniformLocation]
-    } deriving (Show)
+data ProgramInfo = ProgramInfo !GL.Program ![AttribInfo] ![GL.UniformLocation]
+    deriving (Show)
 
 data RenderInfo = RenderInfo
     { riProgram :: !ProgramInfo
@@ -67,12 +63,8 @@ data RenderResource = RenderResource
     , rrLineProgramInfo :: !ProgramInfo
     } deriving (Show)
 
-data VertexGroups = VertexGroups
-    { vgTriangleVertices :: ![TriangleVertex]
-    , vgCircleVertices :: ![CircleVertex]
-    , vgArcVertices :: ![ArcVertex]
-    , vgLineVertices :: ![LineVertex]
-    } deriving (Show)
+data VertexGroups = VertexGroups ![TriangleVertex] ![CircleVertex] ![ArcVertex] ![LineVertex]
+    deriving (Show)
 
 instance Monoid VertexGroups where
     mappend (VertexGroups as bs cs ds) (VertexGroups as' bs' cs' ds') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs') (ds ++ ds')
@@ -204,7 +196,6 @@ allocateRenderInfo resource drawings = do
         withArray xs $ \ptr -> GL.bufferData bufferTarget GL.$= (size, ptr, GL.StreamDraw)
         GL.bindBuffer bufferTarget GL.$= Nothing
         return buffer
-    attribNum = fromIntegral . sum . map aiNumArrayIndices
 
 render :: RenderResource -> Canvas -> IO ()
 render resource (Canvas (V2 ox oy) w h drawings) =
@@ -228,11 +219,11 @@ renderInternal
 renderInternal pm mvm info = do
     GL.currentProgram GL.$= Just program
     GL.bindBuffer GL.ArrayBuffer GL.$= Just vertexBuffer
-    mapM_ (bindAttrib program) attribs
-    mapM_ (bindUniform program) uniforms
+    mapM_ bindAttrib attribs
+    mapM_ bindUniform uniforms
     GL.drawArrays mode (fromIntegral index) (fromIntegral num)
     GL.bindBuffer GL.ArrayBuffer GL.$= Nothing
-    mapM_ (unbindAttrib program) attribs
+    mapM_ unbindAttrib attribs
 
     where
     RenderInfo programInfo mode vertexBuffer index num = info
@@ -259,12 +250,12 @@ allocateProgramInfo vertexShaderCode fragmentShaderCode attribParams uniformName
     program <- allocateProgram [vertexShader, fragmentShader]
 
     liftIO $ do
-        (_, attribs) <- foldrM (allocateAttrib program stride) (stride, []) ([0..] `zip` attribParams)
+        (_, attribs) <- foldrM (allocateAttrib program) (stride, []) attribParams
         uniforms <- mapM (GL.uniformLocation program) uniformNames
         return $ ProgramInfo program attribs uniforms
     where
     stride = sum (map vfByteSize attribParams)
-    allocateAttrib program stride (i, VertexField location attribName dataType num byteSize ihandling) (offset, xs) = do
+    allocateAttrib program (VertexField location attribName dataType num byteSize ihandling) (offset, xs) = do
         let offset' = offset - byteSize
         GL.attribLocation program attribName GL.$= location
         return $ (offset', AttribInfo location dataType num ihandling stride offset' : xs)
@@ -325,30 +316,29 @@ allocateLineProgram = allocateProgramInfo
         , "modelViewMatrix"
         ]
 
-bindAttrib :: GL.Program -> AttribInfo -> IO ()
-bindAttrib program vai = do
+bindAttrib :: AttribInfo -> IO ()
+bindAttrib vai = do
     GL.vertexAttribArray attribLocation GL.$= GL.Enabled
     GL.vertexAttribPointer attribLocation GL.$= (ihandling, vad)
     where
     AttribInfo attribLocation dataType num ihandling stride offset = vai
-    GL.AttribLocation location = attribLocation
     ptrOffset = Ptr.nullPtr `Ptr.plusPtr` offset
     vad = GL.VertexArrayDescriptor (fromIntegral num) dataType (fromIntegral stride) ptrOffset
 
-unbindAttrib :: GL.Program -> AttribInfo -> IO ()
-unbindAttrib program vai =
+unbindAttrib :: AttribInfo -> IO ()
+unbindAttrib vai =
     GL.vertexAttribArray (aiAttribLocation vai) GL.$= GL.Disabled
 
-bindUniform :: GL.Program -> UniformInfo -> IO ()
-bindUniform program (UniformInfo l u) =
+bindUniform :: UniformInfo -> IO ()
+bindUniform (UniformInfo l u) =
     GL.uniform l GL.$= u
 
 allocateShader :: GL.ShaderType -> BS.ByteString -> ResourceT IO GL.Shader
 allocateShader shaderType src = do
-    (_, shader) <- Resource.allocate allocateShader GL.deleteObjectName
+    (_, shader) <- Resource.allocate mkShader GL.deleteObjectName
     return shader
     where
-    allocateShader = do
+    mkShader = do
         shader <- GL.createShader shaderType
         GL.shaderSourceBS shader GL.$= src
         GL.compileShader shader
@@ -380,8 +370,8 @@ checkStatus
 checkStatus getStatus getInfoLog message object = do
     ok <- GL.get . getStatus $ object
     unless ok $ do
-        log <- GL.get . getInfoLog $ object
-        throwIO . userError $ message ++ ": " ++ log
+        log' <- GL.get . getInfoLog $ object
+        throwIO . userError $ message ++ ": " ++ log'
 
 
 rotateMatrix :: Float -> M22 Float
@@ -392,6 +382,3 @@ rotateMatrix a = V2 (V2 cosa (-sina)) (V2 sina cosa)
 
 rotate :: (a, a, a) -> (a, a, a)
 rotate (q0, q1, q2) = (q1, q2, q0)
-
-reverse' :: (a, a, a) -> (a, a, a)
-reverse' (q0, q1, q2) = (q2, q1, q0)

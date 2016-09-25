@@ -17,15 +17,14 @@ import Control.Monad (void)
 import qualified Control.Monad.Trans.State as State
 import Control.Monad.Trans.Class (lift)
 import Data.Constraint (Dict(..))
-import Data.Extensible ((:*)(..), (<:), (@=), Assoc(..), AssocValue, Comp(..), Const'(..), Record(..), Field(..), KeyValue, AssocKey, Forall(..), Membership, hfoldMap, hzipWith, hsequence, library, mkField)
+import Data.Extensible ((:*)(..), (<:), (@=), Assoc(..), AssocKey, AssocValue, Comp(..), Const'(..), Field(..), Forall(..), KeyValue, Membership, Record, hfoldMap, hzipWith, hsequence, library, mkField)
 import Data.Extensible.Internal (getMemberId)
 import Data.Functor.Identity (Identity(..))
-import Data.Monoid ((<>), Monoid(..), Sum(..))
+import Data.Monoid (Sum(..))
 import Data.Proxy (Proxy(..))
-import Data.Foldable (foldrM)
 import Foreign.Ptr (plusPtr, castPtr)
 import Foreign.Storable (Storable(..))
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import GHC.TypeLits (KnownSymbol, symbolVal)
 import qualified Graphics.Rendering.OpenGL as GL
 import Linear (V1(..), V2(..), V3(..), V4(..))
 
@@ -117,14 +116,16 @@ htraverseFor _ f =
 sizeOfField :: forall proxy kv z. (Storable z, AssocValue kv ~ z) => proxy kv -> Int
 sizeOfField _ = sizeOf (undefined :: z)
 
-instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (Record xs) where
+newtype WrapRecord xs = WrapRecord { unWrapRecord :: (Record xs) }
+
+instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (WrapRecord xs) where
     sizeOf _ = getSum . hfoldMap (Sum . getConst') . runIdentity $ r
         where
         f :: forall v kv. (v ~ AssocValue kv, KeyValue KnownSymbol Storable kv) => Membership xs kv -> Identity (Const' Int kv)
         f _ = return . Const' . sizeOf $ (undefined :: v)
         r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Storable)) $ f
     alignment _ = 0
-    peek ptr = flip State.evalStateT 0 $ hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Storable)) f
+    peek ptr = fmap WrapRecord . flip State.evalStateT 0 $ hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Storable)) f
         where
         f :: (Storable (AssocValue kv)) => Membership xs kv -> State.StateT Int IO (Field Identity kv)
         f m = do
@@ -133,7 +134,7 @@ instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (Record xs) whe
               a <- lift . peek $ castPtr ptr `plusPtr` offset
               return (Field (Identity (a)))
     poke ptr =
-        void . flip State.evalStateT 0 . htraverseFor proxy f
+        void . flip State.evalStateT 0 . htraverseFor proxy f . unWrapRecord
         where
             proxy = Proxy :: Proxy (KeyValue KnownSymbol Storable)
             f :: (KeyValue KnownSymbol Storable kv) => Field Identity kv -> State.StateT Int IO (Field Identity kv)
@@ -146,7 +147,7 @@ instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (Record xs) whe
 class Vertex a where
     vertexSpec :: Proxy a -> VertexSpec
 
-instance (Storable (Record xs), Forall (KeyValue KnownSymbol IsVertexAttrib) xs) => Vertex (Record xs) where
+instance (Storable (WrapRecord xs), Forall (KeyValue KnownSymbol IsVertexAttrib) xs) => Vertex (Record xs) where
     vertexSpec _ = VertexSpec . hfoldMap (return . getConst' . getComp) . flip State.evalState 0 $ r
         where
         f :: forall k v kv. (k ~ AssocKey kv, v ~ AssocValue kv, KeyValue KnownSymbol IsVertexAttrib kv)
@@ -155,28 +156,28 @@ instance (Storable (Record xs), Forall (KeyValue KnownSymbol IsVertexAttrib) xs)
               offset <- State.get
               let location = GL.AttribLocation . fromIntegral . getMemberId $ m
                   name = symbolVal (Proxy :: Proxy k)
-                  dataType = valueDataType (Proxy :: Proxy v)
+                  glDataType = valueDataType (Proxy :: Proxy v)
                   num = numberOfValue (Proxy :: Proxy v)
                   size = byteSize (Proxy :: Proxy v)
                   ihandling = integerHandling' (Proxy :: Proxy v)
               State.put $ offset + size
-              return . Comp . Const' $ VertexField location name dataType num size ihandling
+              return . Comp . Const' $ VertexField location name glDataType num size ihandling
         r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol IsVertexAttrib)) f
 
 mkField "prevPosition position nextPosition color lineColor lineWidth center radius startAngle endAngle otherEndPosition jointEndPosition miterLimit positionType"
 
-type TriangleVertexRecord = Record
-    '[ "prevPosition" :> V2 Float
-    , "position" :> V2 Float
-    , "nextPosition" :> V2 Float
-    , "color" :> V4 Float
-    , "lineColor" :> V4 Float
-    , "lineWidth" :> V3 Float
+type TriangleVertexFields =
+    '[ "prevPosition" ':> V2 Float
+    , "position" ':> V2 Float
+    , "nextPosition" ':> V2 Float
+    , "color" ':> V4 Float
+    , "lineColor" ':> V4 Float
+    , "lineWidth" ':> V3 Float
     ]
 
-newtype TriangleVertex = TriangleVertex
-    { unTriangleVertex :: TriangleVertexRecord
-    } deriving (Show)
+type TriangleVertexRecord = Record TriangleVertexFields
+
+newtype TriangleVertex = TriangleVertex TriangleVertexRecord deriving (Show)
 
 triangleVertex :: V2 Float -> V2 Float -> V2 Float -> V4 Float -> V4 Float -> V3 Float -> TriangleVertex
 triangleVertex prevPosition' position' nextPosition' color' lineColor' lineWidth' = TriangleVertex
@@ -189,33 +190,33 @@ triangleVertex prevPosition' position' nextPosition' color' lineColor' lineWidth
     <: Nil
 
 sizeOfTriangleVertex :: Int
-sizeOfTriangleVertex = sizeOf (undefined :: TriangleVertexRecord)
+sizeOfTriangleVertex = sizeOf (undefined :: WrapRecord TriangleVertexFields)
 
 triangleVertexSpec :: VertexSpec
 triangleVertexSpec = vertexSpec (Proxy :: Proxy TriangleVertexRecord)
 
 instance Storable TriangleVertex where
     sizeOf _ = sizeOfTriangleVertex
-    alignment _ = alignment (undefined :: TriangleVertexRecord)
-    peek ptr = TriangleVertex `fmap` (peek . castPtr $ ptr)
-    poke ptr (TriangleVertex v) = poke (castPtr ptr) v
+    alignment _ = alignment (undefined :: WrapRecord TriangleVertexFields)
+    peek ptr = (TriangleVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
+    poke ptr (TriangleVertex v) = poke (castPtr ptr) (WrapRecord v)
 
 instance Vertex TriangleVertex where
     vertexSpec _ = triangleVertexSpec
 
 
-type CircleVertexRecord = Record
-    '[ "position" :> V2 Float
-    , "center" :> V2 Float
-    , "radius" :> Float
-    , "color" :> V4 Float
-    , "lineColor" :> V4 Float
-    , "lineWidth" :> Float
+type CircleVertexFields =
+    '[ "position" ':> V2 Float
+    , "center" ':> V2 Float
+    , "radius" ':> Float
+    , "color" ':> V4 Float
+    , "lineColor" ':> V4 Float
+    , "lineWidth" ':> Float
     ]
 
-newtype CircleVertex = CircleVertex
-    { unCircleVertex :: CircleVertexRecord
-    } deriving (Show)
+type CircleVertexRecord = Record CircleVertexFields
+
+newtype CircleVertex = CircleVertex CircleVertexRecord deriving (Show)
 
 circleVertex :: V2 Float -> V2 Float -> Float -> V4 Float -> V4 Float -> Float -> CircleVertex
 circleVertex position' center' radius' color' lineColor' lineWidth' = CircleVertex
@@ -228,34 +229,34 @@ circleVertex position' center' radius' color' lineColor' lineWidth' = CircleVert
     <: Nil
 
 sizeOfCircleVertex :: Int
-sizeOfCircleVertex = sizeOf (undefined :: CircleVertexRecord)
+sizeOfCircleVertex = sizeOf (undefined :: WrapRecord CircleVertexFields)
 
 circleVertexSpec :: VertexSpec
 circleVertexSpec = vertexSpec (Proxy :: Proxy CircleVertexRecord)
 
 instance Storable CircleVertex where
     sizeOf _ = sizeOfCircleVertex
-    alignment _ = alignment (undefined :: CircleVertexRecord)
-    peek ptr = CircleVertex `fmap` (peek . castPtr $ ptr)
-    poke ptr (CircleVertex v) = poke (castPtr ptr) v
+    alignment _ = alignment (undefined :: WrapRecord CircleVertexFields)
+    peek ptr = (CircleVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
+    poke ptr (CircleVertex v) = poke (castPtr ptr) (WrapRecord v)
 
 instance Vertex CircleVertex where
     vertexSpec _ = circleVertexSpec
 
 
-type ArcVertexRecord = Record
-    '[ "position" :> V2 Float
-    , "center" :> V2 Float
-    , "radius" :> Float
-    , "lineColor" :> V4 Float
-    , "lineWidth" :> Float
-    , "startAngle" :> Float
-    , "endAngle" :> Float
+type ArcVertexFields =
+    '[ "position" ':> V2 Float
+    , "center" ':> V2 Float
+    , "radius" ':> Float
+    , "lineColor" ':> V4 Float
+    , "lineWidth" ':> Float
+    , "startAngle" ':> Float
+    , "endAngle" ':> Float
     ]
 
-newtype ArcVertex = ArcVertex
-    { unArcVertex :: ArcVertexRecord
-    } deriving (Show)
+type ArcVertexRecord = Record ArcVertexFields
+
+newtype ArcVertex = ArcVertex ArcVertexRecord deriving (Show)
 
 arcVertex :: V2 Float -> V2 Float -> Float -> V4 Float -> Float -> Float -> Float -> ArcVertex
 arcVertex position' center' radius' lineColor' lineWidth' startAngle' endAngle' = ArcVertex
@@ -269,34 +270,34 @@ arcVertex position' center' radius' lineColor' lineWidth' startAngle' endAngle' 
     <: Nil
 
 sizeOfArcVertex :: Int
-sizeOfArcVertex = sizeOf (undefined :: ArcVertexRecord)
+sizeOfArcVertex = sizeOf (undefined :: WrapRecord ArcVertexFields)
 
 arcVertexSpec :: VertexSpec
 arcVertexSpec = vertexSpec (Proxy :: Proxy ArcVertexRecord)
 
 instance Storable ArcVertex where
     sizeOf _ = sizeOfArcVertex
-    alignment _ = alignment (undefined :: ArcVertexRecord)
-    peek ptr = ArcVertex `fmap` (peek . castPtr $ ptr)
-    poke ptr (ArcVertex v) = poke (castPtr ptr) v
+    alignment _ = alignment (undefined :: WrapRecord ArcVertexFields)
+    peek ptr = (ArcVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
+    poke ptr (ArcVertex v) = poke (castPtr ptr) (WrapRecord v)
 
 instance Vertex ArcVertex where
     vertexSpec _ = arcVertexSpec
 
 
-type LineVertexRecord = Record
-    '[ "position" :> V2 Float
-    , "otherEndPosition" :> V2 Float
-    , "jointEndPosition" :> V2 Float
-    , "lineWidth" :> Float
-    , "miterLimit" :> Float
-    , "positionType" :> GL.GLint
-    , "lineColor" :> V4 Float
+type LineVertexFields =
+    '[ "position" ':> V2 Float
+    , "otherEndPosition" ':> V2 Float
+    , "jointEndPosition" ':> V2 Float
+    , "lineWidth" ':> Float
+    , "miterLimit" ':> Float
+    , "positionType" ':> GL.GLint
+    , "lineColor" ':> V4 Float
     ]
 
-newtype LineVertex = LineVertex
-    { unLineVertex :: LineVertexRecord
-    } deriving (Show)
+type LineVertexRecord = Record LineVertexFields
+
+newtype LineVertex = LineVertex LineVertexRecord deriving (Show)
 
 lineVertex :: V2 Float -> V2 Float -> V2 Float -> Float -> Float -> GL.GLint -> V4 Float -> LineVertex
 lineVertex position' otherEndPosition' jointEndPosition' lineWidth' miterLimit' positionType' lineColor' = LineVertex
@@ -310,16 +311,16 @@ lineVertex position' otherEndPosition' jointEndPosition' lineWidth' miterLimit' 
     <: Nil
 
 sizeOfLineVertex :: Int
-sizeOfLineVertex = sizeOf (undefined :: LineVertexRecord)
+sizeOfLineVertex = sizeOf (undefined :: WrapRecord LineVertexFields)
 
 lineVertexSpec :: VertexSpec
 lineVertexSpec = vertexSpec (Proxy :: Proxy LineVertexRecord)
 
 instance Storable LineVertex where
     sizeOf _ = sizeOfLineVertex
-    alignment _ = alignment (undefined :: LineVertexRecord)
-    peek ptr = LineVertex `fmap` (peek . castPtr $ ptr)
-    poke ptr (LineVertex v) = poke (castPtr ptr) v
+    alignment _ = alignment (undefined :: WrapRecord LineVertexFields)
+    peek ptr = (LineVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
+    poke ptr (LineVertex v) = poke (castPtr ptr) (WrapRecord v)
 
 instance Vertex LineVertex where
     vertexSpec _ = lineVertexSpec
