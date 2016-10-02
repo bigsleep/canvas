@@ -10,7 +10,6 @@ in float fragEndAngle;
 out vec4 outColor;
 
 const float pi2 = 6.283185307179586;
-const vec4 outsideColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 void main()
 {
@@ -28,9 +27,9 @@ void main()
             (fragStartAngle > fragEndAngle) && (angle <= fragEndAngle || fragStartAngle <= angle)) {
             outColor = fragLineColor;
         } else {
-            outColor = outsideColor;
+            discard;
         }
     } else {
-        outColor = outsideColor;
+        discard;
     }
 }
