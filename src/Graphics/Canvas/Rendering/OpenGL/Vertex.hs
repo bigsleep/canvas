@@ -164,7 +164,7 @@ instance (Storable (WrapRecord xs), Forall (KeyValue KnownSymbol IsVertexAttrib)
               return . Comp . Const' $ VertexField location name glDataType num size ihandling
         r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol IsVertexAttrib)) f
 
-mkField "prevPosition position nextPosition color lineColor lineWidth center radius startAngle endAngle otherEndPosition jointEndPosition miterLimit positionType"
+mkField "prevPosition position nextPosition color lineColor bottomLineWidth topLineWidth lineFlags lineWidth center radius startAngle endAngle otherEndPosition jointEndPosition miterLimit positionType"
 
 type TriangleVertexFields =
     '[ "prevPosition" ':> V2 Float
@@ -172,21 +172,25 @@ type TriangleVertexFields =
     , "nextPosition" ':> V2 Float
     , "color" ':> V4 Float
     , "lineColor" ':> V4 Float
-    , "lineWidth" ':> V3 Float
+    , "bottomLineWidth" ':> Float
+    , "topLineWidth" ':> Float
+    , "lineFlags" ':> GL.GLuint
     ]
 
 type TriangleVertexRecord = Record TriangleVertexFields
 
 newtype TriangleVertex = TriangleVertex TriangleVertexRecord deriving (Show)
 
-triangleVertex :: V2 Float -> V2 Float -> V2 Float -> V4 Float -> V4 Float -> V3 Float -> TriangleVertex
-triangleVertex prevPosition' position' nextPosition' color' lineColor' lineWidth' = TriangleVertex
+triangleVertex :: V2 Float -> V2 Float -> V2 Float -> V4 Float -> V4 Float -> Float -> Float -> GL.GLuint -> TriangleVertex
+triangleVertex prevPosition' position' nextPosition' color' lineColor' bottomLineWidth' topLineWidth' lineFlags' = TriangleVertex
     $ prevPosition @= prevPosition'
     <: position @= position'
     <: nextPosition @= nextPosition'
     <: color @= color'
     <: lineColor @= lineColor'
-    <: lineWidth @= lineWidth'
+    <: bottomLineWidth @= bottomLineWidth'
+    <: topLineWidth @= topLineWidth'
+    <: lineFlags @= lineFlags'
     <: Nil
 
 sizeOfTriangleVertex :: Int

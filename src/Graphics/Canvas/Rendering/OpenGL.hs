@@ -21,6 +21,7 @@ import Control.Monad (unless)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Resource (ResourceT)
 import qualified Control.Monad.Trans.Resource as Resource (allocate, runResourceT)
+import Data.Bits hiding (rotate)
 import qualified Data.ByteString as BS
 import Data.FileEmbed (embedFile)
 import Data.Foldable (Foldable(..), foldrM)
@@ -76,7 +77,8 @@ convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroup
     LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
     vs = take 3 $ iterate rotate (p0, p1, p2)
-    format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor (V3 lineWidth lineWidth lineWidth)
+    lineFlags = triangleBottomLine0 .|. triangleBottomLine1 .|. triangleBottomLine2
+    format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
     vertices = map format $ vs
 
 convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = VertexGroups vertices [] [] []
@@ -87,9 +89,10 @@ convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = Ver
     p1 = V2 (x + width) y
     p2 = V2 (x + width) (y + height)
     p3 = V2 x (y + height)
-    format ((q0, w0), (q1, w1), (q2, w2)) = triangleVertex q0 q1 q2 fillColor lineColor (V3 w0 w1 w2)
-    gen (q0, q1, q2)= take 3 (iterate rotate ((q0, lineWidth), (q1, lineWidth), (q2, 0)))
-    vs = gen (p2, p0, p1) ++ gen (p0, p2, p3)
+    lineFlags = triangleBottomLine0 .|. triangleBottomLine1
+    format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
+    gen = take 3 . iterate rotate
+    vs = gen (p1, p0, p2) ++ gen (p3, p2, p0)
     vertices = map format $ vs
 
 convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups [] vertices [] []
@@ -382,3 +385,13 @@ rotateMatrix a = V2 (V2 cosa (-sina)) (V2 sina cosa)
 
 rotate :: (a, a, a) -> (a, a, a)
 rotate (q0, q1, q2) = (q1, q2, q0)
+
+
+triangleBottomLine0 :: GL.GLuint
+triangleBottomLine0 = 1
+
+triangleBottomLine1 :: GL.GLuint
+triangleBottomLine1 = 1 `shiftL` 1
+
+triangleBottomLine2 :: GL.GLuint
+triangleBottomLine2 = 1 `shiftL` 2

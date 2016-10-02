@@ -19,7 +19,7 @@ main = do
         lineColor = V4 0 0 0 1
         fillColor = V4 0 1 0 1
 
-        lineStyle = LineStyle lineColor 0.8
+        lineStyle = LineStyle lineColor 2
         fillStyle = FillStyle fillColor
         style = (ShapeStyle lineStyle fillStyle)
 
