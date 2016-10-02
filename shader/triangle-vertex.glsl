@@ -5,10 +5,14 @@ in vec2 position;
 in vec2 nextPosition;
 in vec4 color;
 in vec4 lineColor;
-in vec3 lineWidth;
+in float bottomLineWidth;
+in float topLineWidth;
+in int lineFlags;
 out vec4 fragmentColor;
 out vec4 fragmentLineColor;
-varying vec3 sideAttrib;
+flat out int fragmentLineFlags;
+out vec3 bottomLineAttrib;
+out vec3 topLineAttrib;
 
 uniform mat4 projectionMatrix;
 uniform mat4 modelViewMatrix;
@@ -32,20 +36,24 @@ void main()
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 0.0, 1.0);
     fragmentColor = color;
     fragmentLineColor = lineColor;
+    fragmentLineFlags = lineFlags;
 
-    sideAttrib = vec3(0.0, 0.0, 0.0);
-    for (int i = 0; i < 3; i++) {
-        if (lineWidth[i] < epsilon) {
-            sideAttrib[(gl_VertexID + 2 + i) % 3] = -big;
+    bottomLineAttrib = vec3(0.0, 0.0, 0.0);
+    float sideDistance = distanceOfPointToLine(position, nextPosition, prevPosition);
+    if (bottomLineWidth >= epsilon) {
+        if (sideDistance <= bottomLineWidth) {
+            bottomLineAttrib[gl_VertexID % 3] = big;
+        } else {
+            bottomLineAttrib[gl_VertexID % 3] = sideDistance / bottomLineWidth;
         }
     }
-    if (lineWidth[1] >= epsilon) {
-        float sideDistance = distanceOfPointToLine(position, nextPosition, prevPosition);
-        if (sideDistance <= lineWidth[1]) {
-            sideAttrib[gl_VertexID % 3] = big;
+
+    topLineAttrib = vec3(0.0, 0.0, 0.0);
+    if (topLineWidth >= epsilon) {
+        if (sideDistance <= topLineWidth) {
+            topLineAttrib[gl_VertexID % 3] = big;
         } else {
-            float a = sideDistance / lineWidth[1];
-            sideAttrib[gl_VertexID % 3] = a;
+            topLineAttrib[gl_VertexID % 3] = sideDistance / (sideDistance - topLineWidth);
         }
     }
 }
