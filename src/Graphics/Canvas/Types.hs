@@ -22,7 +22,7 @@ data Shape
     = Triangle !Coord !Coord !Coord
     | Rectangle !Coord !Float !Float
     | Circle !Coord !Float
---    | RoundRect !Coord !Float !Float !Float
+    | RoundRect !Coord !Float !Float !Float
     deriving (Show, Read, Eq)
 
 data Path

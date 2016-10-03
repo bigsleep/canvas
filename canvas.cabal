@@ -68,6 +68,19 @@ executable circle-sample
                      , resourcet
   default-language:    Haskell2010
 
+executable roundrect-sample
+  hs-source-dirs:      sample
+  main-is:             RoundRect.hs
+  build-depends:       base >= 4.7 && < 5
+                     , linear
+                     , OpenGL
+                     , GLFW-b
+                     , canvas
+                     , transformers
+                     , resourcet
+  default-language:    Haskell2010
+
+
 executable arc-sample
   hs-source-dirs:      sample
   main-is:             Arc.hs

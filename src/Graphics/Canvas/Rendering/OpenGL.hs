@@ -25,6 +25,7 @@ import Data.Bits hiding (rotate)
 import qualified Data.ByteString as BS
 import Data.FileEmbed (embedFile)
 import Data.Foldable (Foldable(..), foldrM)
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy(..))
 import Foreign.Marshal.Array (withArray)
 import qualified Foreign.Ptr as Ptr
@@ -32,7 +33,7 @@ import Foreign.Storable (Storable(..), sizeOf)
 import Graphics.Canvas.Types
 import Graphics.Canvas.Rendering.OpenGL.Vertex
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V2(..), V3(..), V4(..), M22, (!*), ortho, lookAt)
+import Linear (V2(..), V3(..), V4(..), M22, (!*), ortho, lookAt, nearZero)
 
 data UniformInfo = forall a. (GL.Uniform a, Show a) => UniformInfo !GL.UniformLocation !a
 deriving instance Show UniformInfo
@@ -83,21 +84,18 @@ convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroup
     format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
     vertices = map format $ vs
 
+convertDrawing (ShapeDrawing _ _ (Rectangle _ width height)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
+
 convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = VertexGroups vertices [] [] []
     where
     lineStyle = shapeStyleLineStyle shapeStyle
     (lineColor, lineWidth, lineFlags) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0, 0)
-        Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine1)
+        Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2)
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
-    V2 x y = p0
-    p1 = V2 (x + width) y
-    p2 = V2 (x + width) (y + height)
-    p3 = V2 x (y + height)
-    format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
-    gen = take 3 . iterate rotate
-    vs = gen (p1, p0, p2) ++ gen (p3, p2, p0)
-    vertices = map format $ vs
+    vertices = genRectVertices fillColor lineColor lineWidth lineWidth lineFlags lineFlags p0 width height
+
+convertDrawing (ShapeDrawing _ _ (Circle _ radius)) | radius <= 0 = mempty
 
 convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups [] vertices [] []
     where
@@ -107,13 +105,39 @@ convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups
         Just (LineStyle c w) -> (c, w)
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
     V2 x y = p0
-    r' = radius / sin (pi / 3)
+    r' = radius * 1.16
     m = V2 (V3 r' 0 x)
            (V3 0 r' y)
     vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
     format q = circleVertex q p0 radius fillColor lineColor lineWidth
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = concatMap (map format) $ xs
+
+convertDrawing (ShapeDrawing _ _ (RoundRect _ width height _)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
+
+convertDrawing (ShapeDrawing shapeStyle trans (RoundRect p0 width height radius)) | nearZero radius = convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height))
+
+convertDrawing (ShapeDrawing shapeStyle trans (RoundRect p0 width height radius')) = VertexGroups tvs cvs [] []
+    where
+    radius = radius' `min` (height * 0.5) `min` (width * 0.5)
+    V2 x y = p0
+    lineStyle = shapeStyleLineStyle shapeStyle
+    LineStyle lineColor lineWidth = fromMaybe (LineStyle (V4 0 0 0 0) 0) lineStyle
+    FillStyle fillColor = shapeStyleFillStyle shapeStyle
+    rectLineFlag = if lineWidth > radius
+        then triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2
+        else 0
+    genRect f0 f1 lw q w h = genRectVertices fillColor lineColor lw lw f0 f1 q w h
+    tvs = genRect triangleBottomLine2 triangleTopLine2 lineWidth (V2 (x + radius) y) (width - radius * 2) radius
+        ++ genRect triangleBottomLine0 triangleTopLine0 lineWidth (V2 (x + width - radius) (y + radius)) radius (height - radius * 2)
+        ++ genRect triangleTopLine2 triangleBottomLine2 lineWidth (V2 (x + radius) (y + height - radius)) (width - radius * 2) radius
+        ++ genRect triangleTopLine0 triangleBottomLine0 lineWidth (V2 x (y + radius)) radius (height - radius * 2)
+        ++ genRect rectLineFlag rectLineFlag (max 0 (lineWidth - radius)) (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
+    vs = take 4 . iterate (\(V2 vx vy) -> (V2 (-vy) vx)) $ V2 (-radius * 1.5) 0
+    centers = genRectCoords (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
+    formatCircleVertices q r = circleVertex r q radius fillColor lineColor lineWidth
+    cvs = concatMap (\(q, v) -> map (formatCircleVertices q) $ genCornerCoords q v) $ zip centers vs
+    genCornerCoords q v @ (V2 vx vy) = [q, q + v, q + (V2 (-vy) vx)]
 
 convertDrawing (PathDrawing lineStyle trans (Arc p0 radius startAngle endAngle)) = VertexGroups [] [] vertices []
     where
@@ -176,6 +200,23 @@ circleVertices = vertices
     da = 2 * pi / fromIntegral division :: Float
     rmat = rotateMatrix da
     vertices = take division $ iterate (rmat !*) (V2 0 1)
+
+genRectCoords :: Coord -> Float -> Float -> [Coord]
+genRectCoords p0 width height = [p0, p1, p2, p3]
+    where
+    V2 x y = p0
+    p1 = V2 (x + width) y
+    p2 = V2 (x + width) (y + height)
+    p3 = V2 x (y + height)
+
+genRectVertices :: Color -> Color -> Float -> Float -> GL.GLuint -> GL.GLuint -> Coord -> Float -> Float -> [TriangleVertex]
+genRectVertices fillColor lineColor bottomLineWidth topLineWidth lineFlags0 lineFlags1 p0 width height = vertices
+    where
+    _ : p1 : p2 : p3 : _ = genRectCoords p0 width height
+    format (flag, (q0, q1, q2)) = triangleVertex q0 q1 q2 fillColor lineColor bottomLineWidth topLineWidth flag
+    gen flag = zip (repeat flag) . take 3 . iterate rotate
+    vs = gen lineFlags0 (p2, p0, p1) ++ gen lineFlags1 (p0, p2, p3)
+    vertices = map format $ vs
 
 allocateRenderInfo
     :: RenderResource
@@ -402,3 +443,12 @@ triangleBottomLine1 = 1 `shiftL` 1
 
 triangleBottomLine2 :: GL.GLuint
 triangleBottomLine2 = 1 `shiftL` 2
+
+triangleTopLine0 :: GL.GLuint
+triangleTopLine0 = 1 `shiftL` 3
+
+triangleTopLine1 :: GL.GLuint
+triangleTopLine1 = 1 `shiftL` 4
+
+triangleTopLine2 :: GL.GLuint
+triangleTopLine2 = 1 `shiftL` 5

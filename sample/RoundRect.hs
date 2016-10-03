@@ -17,11 +17,8 @@ main = do
         height = 480
 
         lineColor = V4 0 0 0 1
-        fillColor = V4 0 1 0 1
-
         lineStyle = LineStyle lineColor 4
-        fillStyle = FillStyle fillColor
-        style = (ShapeStyle (Just lineStyle) fillStyle)
+        cornerRadius = 10
 
         divCount = 1
         dx = fromIntegral width / fromIntegral divCount
@@ -33,7 +30,7 @@ main = do
             let x0 = fromIntegral i * dx
                 y0 = fromIntegral j * dy
                 r = 1.0
-                rectangle = Rectangle (V2 x0 y0) (0.5 * dx) (0.5 * dy)
+                rectangle = RoundRect (V2 x0 y0) (0.5 * dx) (0.5 * dy) cornerRadius
                 style = ShapeStyle (Just lineStyle) (FillStyle $ V4 r 0 0 1.0)
             return $ ShapeDrawing style [] rectangle
 

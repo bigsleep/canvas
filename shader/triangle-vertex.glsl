@@ -42,10 +42,12 @@ void main()
     float sideDistance = distanceOfPointToLine(position, nextPosition, prevPosition);
     if (bottomLineWidth >= epsilon) {
         if (sideDistance <= bottomLineWidth) {
-            bottomLineAttrib[gl_VertexID % 3] = big;
+            bottomLineAttrib[gl_VertexID % 3] = -big;
         } else {
             bottomLineAttrib[gl_VertexID % 3] = sideDistance / bottomLineWidth;
         }
+    } else {
+        bottomLineAttrib[gl_VertexID % 3] = big;
     }
 
     topLineAttrib = vec3(0.0, 0.0, 0.0);
