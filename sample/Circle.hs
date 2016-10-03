@@ -21,7 +21,7 @@ main = do
 
         lineStyle = LineStyle lineColor 0.8
         fillStyle = FillStyle fillColor
-        style = (ShapeStyle lineStyle fillStyle)
+        style = (ShapeStyle (Just lineStyle) fillStyle)
 
         divCount = 4
         dx = fromIntegral width / fromIntegral divCount
@@ -35,7 +35,7 @@ main = do
                 y0 = fromIntegral j * dy
                 r = 1
                 circle = Circle (V2 x0 y0) radius
-                style = ShapeStyle lineStyle (FillStyle $ V4 r 0 0 1)
+                style = ShapeStyle (Just lineStyle) (FillStyle $ V4 r 0 0 1)
             return $ ShapeDrawing style [] circle
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings

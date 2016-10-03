@@ -33,7 +33,7 @@ data Path
     deriving (Show, Read, Eq)
 
 data ShapeStyle = ShapeStyle
-    { shapeStyleLineStyle :: !LineStyle
+    { shapeStyleLineStyle :: !(Maybe LineStyle)
     , shapeStyleFillStyle :: !FillStyle
     }
     deriving (Show, Read, Eq)

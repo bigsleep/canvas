@@ -32,7 +32,7 @@ import Foreign.Storable (Storable(..), sizeOf)
 import Graphics.Canvas.Types
 import Graphics.Canvas.Rendering.OpenGL.Vertex
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V2(..), V3(..), M22, (!*), ortho, lookAt)
+import Linear (V2(..), V3(..), V4(..), M22, (!*), ortho, lookAt)
 
 data UniformInfo = forall a. (GL.Uniform a, Show a) => UniformInfo !GL.UniformLocation !a
 deriving instance Show UniformInfo
@@ -74,22 +74,26 @@ instance Monoid VertexGroups where
 convertDrawing :: Drawing -> VertexGroups
 convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroups vertices [] [] []
     where
-    LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
+    lineStyle = shapeStyleLineStyle shapeStyle
+    (lineColor, lineWidth, lineFlags) = case lineStyle of
+        Nothing -> (V4 0 0 0 0, 0, 0)
+        Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine1 .|. triangleBottomLine2)
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
     vs = take 3 $ iterate rotate (p0, p1, p2)
-    lineFlags = triangleBottomLine0 .|. triangleBottomLine1 .|. triangleBottomLine2
     format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
     vertices = map format $ vs
 
 convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = VertexGroups vertices [] [] []
     where
-    LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
+    lineStyle = shapeStyleLineStyle shapeStyle
+    (lineColor, lineWidth, lineFlags) = case lineStyle of
+        Nothing -> (V4 0 0 0 0, 0, 0)
+        Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine1)
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
     V2 x y = p0
     p1 = V2 (x + width) y
     p2 = V2 (x + width) (y + height)
     p3 = V2 x (y + height)
-    lineFlags = triangleBottomLine0 .|. triangleBottomLine1
     format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
     gen = take 3 . iterate rotate
     vs = gen (p1, p0, p2) ++ gen (p3, p2, p0)
@@ -97,7 +101,10 @@ convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = Ver
 
 convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups [] vertices [] []
     where
-    LineStyle lineColor lineWidth = shapeStyleLineStyle shapeStyle
+    lineStyle = shapeStyleLineStyle shapeStyle
+    (lineColor, lineWidth) = case lineStyle of
+        Nothing -> (V4 0 0 0 0, 0)
+        Just (LineStyle c w) -> (c, w)
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
     V2 x y = p0
     r' = radius / sin (pi / 3)
