@@ -20,7 +20,6 @@ import Data.Constraint (Dict(..))
 import Data.Extensible ((:*)(..), (<:), (@=), Assoc(..), AssocKey, AssocValue, Comp(..), Const'(..), Field(..), Forall(..), KeyValue, Membership, Record, hfoldMap, hzipWith, hsequence, library, mkField)
 import Data.Extensible.Internal (getMemberId)
 import Data.Functor.Identity (Identity(..))
-import Data.Monoid (Sum(..))
 import Data.Proxy (Proxy(..))
 import Foreign.Ptr (plusPtr, castPtr)
 import Foreign.Storable (Storable(..))
@@ -34,6 +33,7 @@ data VertexField = VertexField
     , vfDataType :: !GL.DataType
     , vfNumberOfValue :: !Int
     , vfByteSize :: !Int
+    , vfByteOffset :: !Int
     , vfIntegerlHandling :: !GL.IntegerHandling
     } deriving (Show, Eq)
 
@@ -73,7 +73,7 @@ instance HasDataType GL.GLdouble where
     dataType _ = GL.Double
     integerHandling _ = GL.ToFloat
 
-class IsVertexAttrib a where
+class (Storable a) => IsVertexAttrib a where
     valueDataType :: Proxy a -> GL.DataType
     numberOfValue :: Proxy a -> Int
     byteSize :: Proxy a -> Int
@@ -113,25 +113,34 @@ htraverseFor :: forall c f g h proxy xs. (Forall c xs, Applicative f) => proxy c
 htraverseFor _ f =
     hsequence . hzipWith (\(Comp Dict) a -> Comp (f a)) (library :: Comp Dict c :* xs)
 
-sizeOfField :: forall proxy kv z. (Storable z, AssocValue kv ~ z) => proxy kv -> Int
-sizeOfField _ = sizeOf (undefined :: z)
+newtype Lcm = Lcm { getLcm :: Int } deriving (Show, Eq)
+
+instance Monoid Lcm where
+    mempty = Lcm 1
+    mappend (Lcm a) (Lcm b) = (Lcm (lcm a b))
 
 newtype WrapRecord xs = WrapRecord { unWrapRecord :: (Record xs) }
 
 instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (WrapRecord xs) where
-    sizeOf _ = getSum . hfoldMap (Sum . getConst') . runIdentity $ r
+    sizeOf a = size' + (size' `mod` alignment a)
+        where
+        f :: forall v kv. (v ~ AssocValue kv, KeyValue KnownSymbol Storable kv) => Membership xs kv -> State.State Int (Proxy kv)
+        f _ = State.modify (\offset -> offset + (offset `mod` alignment (undefined :: v)) + sizeOf (undefined :: v)) >> return (Proxy :: Proxy kv)
+        r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Storable)) $ f
+        size' = State.execState r 0
+    alignment _ = getLcm . hfoldMap (Lcm . getConst') . runIdentity $ r
         where
         f :: forall v kv. (v ~ AssocValue kv, KeyValue KnownSymbol Storable kv) => Membership xs kv -> Identity (Const' Int kv)
-        f _ = return . Const' . sizeOf $ (undefined :: v)
+        f _ = return . Const' . alignment $ (undefined :: v)
         r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Storable)) $ f
-    alignment _ = 0
     peek ptr = fmap WrapRecord . flip State.evalStateT 0 $ hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Storable)) f
         where
-        f :: (Storable (AssocValue kv)) => Membership xs kv -> State.StateT Int IO (Field Identity kv)
-        f m = do
+        f :: forall kv v. (v ~ AssocValue kv, Storable v) => Membership xs kv -> State.StateT Int IO (Field Identity kv)
+        f _ = do
               offset <- State.get
-              State.put (offset + sizeOfField m)
-              a <- lift . peek $ castPtr ptr `plusPtr` offset
+              let offset' = offset + (offset `mod` alignment (undefined :: v))
+              State.put (offset' + sizeOf (undefined :: v))
+              a <- lift . peek $ castPtr ptr `plusPtr` offset'
               return (Field (Identity (a)))
     poke ptr =
         void . flip State.evalStateT 0 . htraverseFor proxy f . unWrapRecord
@@ -140,8 +149,9 @@ instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (WrapRecord xs)
             f :: (KeyValue KnownSymbol Storable kv) => Field Identity kv -> State.StateT Int IO (Field Identity kv)
             f kv @ (Field (Identity x)) = do
                 offset <- State.get
-                State.put (offset + sizeOf x)
-                lift $ poke (castPtr ptr `plusPtr` offset) x
+                let offset' = offset + (offset `mod` alignment x)
+                State.put (offset' + sizeOf x)
+                lift $ poke (castPtr ptr `plusPtr` offset') x
                 return kv
 
 class Vertex a where
@@ -155,13 +165,15 @@ instance (Storable (WrapRecord xs), Forall (KeyValue KnownSymbol IsVertexAttrib)
         f m = do
               offset <- State.get
               let location = GL.AttribLocation . fromIntegral . getMemberId $ m
+                  vproxy = Proxy :: Proxy v
                   name = symbolVal (Proxy :: Proxy k)
-                  glDataType = valueDataType (Proxy :: Proxy v)
-                  num = numberOfValue (Proxy :: Proxy v)
-                  size = byteSize (Proxy :: Proxy v)
-                  ihandling = integerHandling' (Proxy :: Proxy v)
-              State.put $ offset + size
-              return . Comp . Const' $ VertexField location name glDataType num size ihandling
+                  glDataType = valueDataType vproxy
+                  num = numberOfValue vproxy
+                  size = byteSize vproxy
+                  ihandling = integerHandling' vproxy
+                  offset' = offset + (offset `mod` alignment (undefined :: v))
+              State.put $ offset' + size
+              return . Comp . Const' $ VertexField location name glDataType num size offset' ihandling
         r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol IsVertexAttrib)) f
 
 mkField "prevPosition position nextPosition color lineColor bottomLineWidth topLineWidth lineFlags lineWidth center radius startAngle endAngle otherEndPosition jointEndPosition miterLimit positionType"
@@ -196,12 +208,15 @@ triangleVertex prevPosition' position' nextPosition' color' lineColor' bottomLin
 sizeOfTriangleVertex :: Int
 sizeOfTriangleVertex = sizeOf (undefined :: WrapRecord TriangleVertexFields)
 
+alignmentOfTriangleVertex :: Int
+alignmentOfTriangleVertex = alignment (undefined :: WrapRecord TriangleVertexFields)
+
 triangleVertexSpec :: VertexSpec
 triangleVertexSpec = vertexSpec (Proxy :: Proxy TriangleVertexRecord)
 
 instance Storable TriangleVertex where
     sizeOf _ = sizeOfTriangleVertex
-    alignment _ = alignment (undefined :: WrapRecord TriangleVertexFields)
+    alignment _ = alignmentOfTriangleVertex
     peek ptr = (TriangleVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
     poke ptr (TriangleVertex v) = poke (castPtr ptr) (WrapRecord v)
 
@@ -235,12 +250,15 @@ circleVertex position' center' radius' color' lineColor' lineWidth' = CircleVert
 sizeOfCircleVertex :: Int
 sizeOfCircleVertex = sizeOf (undefined :: WrapRecord CircleVertexFields)
 
+alignmentOfCircleVertex :: Int
+alignmentOfCircleVertex = alignment (undefined :: WrapRecord CircleVertexFields)
+
 circleVertexSpec :: VertexSpec
 circleVertexSpec = vertexSpec (Proxy :: Proxy CircleVertexRecord)
 
 instance Storable CircleVertex where
     sizeOf _ = sizeOfCircleVertex
-    alignment _ = alignment (undefined :: WrapRecord CircleVertexFields)
+    alignment _ = alignmentOfCircleVertex
     peek ptr = (CircleVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
     poke ptr (CircleVertex v) = poke (castPtr ptr) (WrapRecord v)
 
@@ -276,12 +294,15 @@ arcVertex position' center' radius' lineColor' lineWidth' startAngle' endAngle' 
 sizeOfArcVertex :: Int
 sizeOfArcVertex = sizeOf (undefined :: WrapRecord ArcVertexFields)
 
+alignmentOfArcVertex :: Int
+alignmentOfArcVertex = alignment (undefined :: WrapRecord ArcVertexFields)
+
 arcVertexSpec :: VertexSpec
 arcVertexSpec = vertexSpec (Proxy :: Proxy ArcVertexRecord)
 
 instance Storable ArcVertex where
     sizeOf _ = sizeOfArcVertex
-    alignment _ = alignment (undefined :: WrapRecord ArcVertexFields)
+    alignment _ = alignmentOfArcVertex
     peek ptr = (ArcVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
     poke ptr (ArcVertex v) = poke (castPtr ptr) (WrapRecord v)
 
@@ -317,12 +338,15 @@ lineVertex position' otherEndPosition' jointEndPosition' lineWidth' miterLimit' 
 sizeOfLineVertex :: Int
 sizeOfLineVertex = sizeOf (undefined :: WrapRecord LineVertexFields)
 
+alignmentOfLineVertex :: Int
+alignmentOfLineVertex = alignment (undefined :: WrapRecord LineVertexFields)
+
 lineVertexSpec :: VertexSpec
 lineVertexSpec = vertexSpec (Proxy :: Proxy LineVertexRecord)
 
 instance Storable LineVertex where
     sizeOf _ = sizeOfLineVertex
-    alignment _ = alignment (undefined :: WrapRecord LineVertexFields)
+    alignment _ = alignmentOfLineVertex
     peek ptr = (LineVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
     poke ptr (LineVertex v) = poke (castPtr ptr) (WrapRecord v)
 

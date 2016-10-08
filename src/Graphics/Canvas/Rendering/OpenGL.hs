@@ -301,15 +301,14 @@ allocateProgramInfo vertexShaderCode fragmentShaderCode attribParams uniformName
     program <- allocateProgram [vertexShader, fragmentShader]
 
     liftIO $ do
-        (_, attribs) <- foldrM (allocateAttrib program) (stride, []) attribParams
+        attribs <- foldrM (allocateAttrib program) [] attribParams
         uniforms <- mapM (GL.uniformLocation program) uniformNames
         return $ ProgramInfo program attribs uniforms
     where
     stride = sum (map vfByteSize attribParams)
-    allocateAttrib program (VertexField location attribName dataType num byteSize ihandling) (offset, xs) = do
-        let offset' = offset - byteSize
+    allocateAttrib program (VertexField location attribName dataType num _ byteOffset ihandling) xs = do
         GL.attribLocation program attribName GL.$= location
-        return $ (offset', AttribInfo location dataType num ihandling stride offset' : xs)
+        return $ AttribInfo location dataType num ihandling stride byteOffset : xs
 
 allocateTriangleProgram :: ResourceT IO ProgramInfo
 allocateTriangleProgram = allocateProgramInfo
