@@ -119,13 +119,16 @@ instance Monoid Lcm where
     mempty = Lcm 1
     mappend (Lcm a) (Lcm b) = (Lcm (lcm a b))
 
+alignOffset :: forall v. Storable v => v -> Int -> Int
+alignOffset a offset = offset + (alignment a - offset `mod` alignment a)
+
 newtype WrapRecord xs = WrapRecord { unWrapRecord :: (Record xs) }
 
 instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (WrapRecord xs) where
-    sizeOf a = size' + (size' `mod` alignment a)
+    sizeOf = flip alignOffset size'
         where
         f :: forall v kv. (v ~ AssocValue kv, KeyValue KnownSymbol Storable kv) => Membership xs kv -> State.State Int (Proxy kv)
-        f _ = State.modify (\offset -> offset + (offset `mod` alignment (undefined :: v)) + sizeOf (undefined :: v)) >> return (Proxy :: Proxy kv)
+        f _ = State.modify (alignOffset (undefined :: v)) >> return (Proxy :: Proxy kv)
         r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Storable)) $ f
         size' = State.execState r 0
     alignment _ = getLcm . hfoldMap (Lcm . getConst') . runIdentity $ r
@@ -138,7 +141,7 @@ instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (WrapRecord xs)
         f :: forall kv v. (v ~ AssocValue kv, Storable v) => Membership xs kv -> State.StateT Int IO (Field Identity kv)
         f _ = do
               offset <- State.get
-              let offset' = offset + (offset `mod` alignment (undefined :: v))
+              let offset' = alignOffset (undefined :: v) offset
               State.put (offset' + sizeOf (undefined :: v))
               a <- lift . peek $ castPtr ptr `plusPtr` offset'
               return (Field (Identity (a)))
@@ -149,7 +152,7 @@ instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (WrapRecord xs)
             f :: (KeyValue KnownSymbol Storable kv) => Field Identity kv -> State.StateT Int IO (Field Identity kv)
             f kv @ (Field (Identity x)) = do
                 offset <- State.get
-                let offset' = offset + (offset `mod` alignment x)
+                let offset' = alignOffset x offset
                 State.put (offset' + sizeOf x)
                 lift $ poke (castPtr ptr `plusPtr` offset') x
                 return kv
