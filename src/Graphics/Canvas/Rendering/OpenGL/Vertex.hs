@@ -11,6 +11,7 @@ module Graphics.Canvas.Rendering.OpenGL.Vertex
     , arcVertex
     , LineVertex
     , lineVertex
+    , alignOffset
     ) where
 
 import Control.Monad (void)
@@ -120,7 +121,7 @@ instance Monoid Lcm where
     mappend (Lcm a) (Lcm b) = (Lcm (lcm a b))
 
 alignOffset :: forall v. Storable v => v -> Int -> Int
-alignOffset a offset = offset + (alignment a - offset `mod` alignment a)
+alignOffset a offset = offset + ((alignment a - offset) `mod` alignment a)
 
 newtype WrapRecord xs = WrapRecord { unWrapRecord :: (Record xs) }
 
@@ -128,7 +129,7 @@ instance (Forall (KeyValue KnownSymbol Storable) xs) => Storable (WrapRecord xs)
     sizeOf = flip alignOffset size'
         where
         f :: forall v kv. (v ~ AssocValue kv, KeyValue KnownSymbol Storable kv) => Membership xs kv -> State.State Int (Proxy kv)
-        f _ = State.modify (alignOffset (undefined :: v)) >> return (Proxy :: Proxy kv)
+        f _ = State.modify ((+) (sizeOf (undefined :: v)) . alignOffset (undefined :: v)) >> return (Proxy :: Proxy kv)
         r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Storable)) $ f
         size' = State.execState r 0
     alignment _ = getLcm . hfoldMap (Lcm . getConst') . runIdentity $ r
