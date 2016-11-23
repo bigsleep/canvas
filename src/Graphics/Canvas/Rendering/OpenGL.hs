@@ -82,7 +82,7 @@ convertDrawing (ShapeDrawing shapeStyle (Triangle p0 p1 p2)) = VertexGroups vert
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
     vs = take 3 $ iterate rotate (p0, p1, p2)
     format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
-    vertices = map format $ vs
+    vertices = map format vs
 
 convertDrawing (ShapeDrawing _ (Rectangle _ width height)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
 
@@ -111,7 +111,7 @@ convertDrawing (ShapeDrawing shapeStyle (Circle p0 radius)) = VertexGroups [] ve
     vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
     format q = circleVertex q p0 radius fillColor lineColor lineWidth
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
-    vertices = concatMap (map format) $ xs
+    vertices = concatMap (map format) xs
 
 convertDrawing (ShapeDrawing _ (RoundRect _ width height _)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
 
@@ -127,7 +127,7 @@ convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = V
     rectLineFlag = if lineWidth > radius
         then triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2
         else 0
-    genRect f0 f1 lw q w h = genRectVertices fillColor lineColor lw lw f0 f1 q w h
+    genRect f0 f1 lw = genRectVertices fillColor lineColor lw lw f0 f1
     tvs = genRect triangleBottomLine2 triangleTopLine2 lineWidth (V2 (x + radius) y) (width - radius * 2) radius
         ++ genRect triangleBottomLine0 triangleTopLine0 lineWidth (V2 (x + width - radius) (y + radius)) radius (height - radius * 2)
         ++ genRect triangleTopLine2 triangleBottomLine2 lineWidth (V2 (x + radius) (y + height - radius)) (width - radius * 2) radius
@@ -137,7 +137,7 @@ convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = V
     centers = genRectCoords (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
     formatCircleVertices q r = circleVertex r q radius fillColor lineColor lineWidth
     cvs = concatMap (\(q, v) -> map (formatCircleVertices q) $ genCornerCoords q v) $ zip centers vs
-    genCornerCoords q v @ (V2 vx vy) = [q, q + v, q + (V2 (-vy) vx)]
+    genCornerCoords q v @ (V2 vx vy) = [q, q + v, q + V2 (-vy) vx]
 
 convertDrawing (PathDrawing lineStyle (Arc p0 radius startAngle endAngle)) = VertexGroups [] [] vertices []
     where
@@ -149,11 +149,11 @@ convertDrawing (PathDrawing lineStyle (Arc p0 radius startAngle endAngle)) = Ver
     vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
     format q = arcVertex q p0 radius lineColor lineWidth startAngle endAngle
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
-    vertices = concatMap (map format) $ xs
+    vertices = concatMap (map format) xs
 
 convertDrawing (PathDrawing _ (StripPath [])) = VertexGroups [] [] [] []
 
-convertDrawing (PathDrawing _ (StripPath (_ : []))) = VertexGroups [] [] [] []
+convertDrawing (PathDrawing _ (StripPath [_])) = VertexGroups [] [] [] []
 
 convertDrawing (PathDrawing lineStyle (StripPath (p0 : p1 : ps))) = VertexGroups [] [] [] vertices
     where
@@ -222,23 +222,15 @@ allocateRenderInfo
     :: RenderResource
     -> [Drawing]
     -> ResourceT IO [RenderInfo]
-allocateRenderInfo resource drawings = do
-    (_, triangleVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer tvs) GL.deleteObjectName
-    (_, circleVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer cvs) GL.deleteObjectName
-    (_, arcVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer avs) GL.deleteObjectName
-    (_, lineVertexBuffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer lvs) GL.deleteObjectName
-    return [ RenderInfo triangleSource GL.Triangles triangleVertexBuffer 0 tnum
-           , RenderInfo circleSource GL.Triangles circleVertexBuffer 0 cnum
-           , RenderInfo arcSource GL.Triangles arcVertexBuffer 0 anum
-           , RenderInfo lineSource GL.Triangles lineVertexBuffer 0 lnum
-           ]
+allocateRenderInfo resource drawings = sequence
+    [ mkRenderInfo triangleSource tvs
+    , mkRenderInfo circleSource cvs
+    , mkRenderInfo arcSource avs
+    , mkRenderInfo lineSource lvs
+    ]
     where
     RenderResource triangleSource circleSource arcSource lineSource = resource
     VertexGroups tvs cvs avs lvs = fold . map convertDrawing $ drawings
-    tnum = fromIntegral $ length tvs
-    cnum = fromIntegral $ length cvs
-    anum = fromIntegral $ length avs
-    lnum = fromIntegral $ length lvs
     mkBuffer bufferTarget xs = do
         let n = length xs
             size = fromIntegral $ n * sizeOf (head xs)
@@ -247,6 +239,9 @@ allocateRenderInfo resource drawings = do
         withArray xs $ \ptr -> GL.bufferData bufferTarget GL.$= (size, ptr, GL.StreamDraw)
         GL.bindBuffer bufferTarget GL.$= Nothing
         return buffer
+    mkRenderInfo source vs = do
+        (_, buffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
+        return $ RenderInfo source GL.Triangles buffer 0 (fromIntegral $ length vs)
 
 render :: RenderResource -> Canvas -> IO ()
 render resource (Canvas (V2 ox oy) w h drawings) =
