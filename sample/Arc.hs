@@ -35,7 +35,7 @@ main = do
                 y0 = fromIntegral j * dy
                 r = 1
                 arc = Arc (V2 x0 y0) radius startAngle endAngle
-            return $ PathDrawing lineStyle [] arc
+            return $ PathDrawing lineStyle arc
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings
         init = do

@@ -36,7 +36,7 @@ main = do
                 r = 1.0
                 triangle = Triangle (V2 x0 y0) (V2 (x0 + dx) y0) (V2 x0 (y0 + dy))
                 style = ShapeStyle (Just lineStyle) (FillStyle $ V4 r 0 0 1.0)
-            return $ ShapeDrawing style [] triangle
+            return $ ShapeDrawing style triangle
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings
         init = do

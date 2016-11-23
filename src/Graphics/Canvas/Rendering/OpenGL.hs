@@ -73,7 +73,7 @@ instance Monoid VertexGroups where
     mempty = VertexGroups [] [] [] []
 
 convertDrawing :: Drawing -> VertexGroups
-convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroups vertices [] [] []
+convertDrawing (ShapeDrawing shapeStyle (Triangle p0 p1 p2)) = VertexGroups vertices [] [] []
     where
     lineStyle = shapeStyleLineStyle shapeStyle
     (lineColor, lineWidth, lineFlags) = case lineStyle of
@@ -84,9 +84,9 @@ convertDrawing (ShapeDrawing shapeStyle trans (Triangle p0 p1 p2)) = VertexGroup
     format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
     vertices = map format $ vs
 
-convertDrawing (ShapeDrawing _ _ (Rectangle _ width height)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
+convertDrawing (ShapeDrawing _ (Rectangle _ width height)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
 
-convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = VertexGroups vertices [] [] []
+convertDrawing (ShapeDrawing shapeStyle (Rectangle p0 width height)) = VertexGroups vertices [] [] []
     where
     lineStyle = shapeStyleLineStyle shapeStyle
     (lineColor, lineWidth, lineFlags) = case lineStyle of
@@ -95,9 +95,9 @@ convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height)) = Ver
     FillStyle fillColor = shapeStyleFillStyle shapeStyle
     vertices = genRectVertices fillColor lineColor lineWidth lineWidth lineFlags lineFlags p0 width height
 
-convertDrawing (ShapeDrawing _ _ (Circle _ radius)) | radius <= 0 = mempty
+convertDrawing (ShapeDrawing _ (Circle _ radius)) | radius <= 0 = mempty
 
-convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups [] vertices [] []
+convertDrawing (ShapeDrawing shapeStyle (Circle p0 radius)) = VertexGroups [] vertices [] []
     where
     lineStyle = shapeStyleLineStyle shapeStyle
     (lineColor, lineWidth) = case lineStyle of
@@ -113,11 +113,11 @@ convertDrawing (ShapeDrawing shapeStyle trans (Circle p0 radius)) = VertexGroups
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = concatMap (map format) $ xs
 
-convertDrawing (ShapeDrawing _ _ (RoundRect _ width height _)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
+convertDrawing (ShapeDrawing _ (RoundRect _ width height _)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
 
-convertDrawing (ShapeDrawing shapeStyle trans (RoundRect p0 width height radius)) | nearZero radius = convertDrawing (ShapeDrawing shapeStyle trans (Rectangle p0 width height))
+convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius)) | nearZero radius = convertDrawing (ShapeDrawing shapeStyle (Rectangle p0 width height))
 
-convertDrawing (ShapeDrawing shapeStyle trans (RoundRect p0 width height radius')) = VertexGroups tvs cvs [] []
+convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = VertexGroups tvs cvs [] []
     where
     radius = radius' `min` (height * 0.5) `min` (width * 0.5)
     V2 x y = p0
@@ -139,7 +139,7 @@ convertDrawing (ShapeDrawing shapeStyle trans (RoundRect p0 width height radius'
     cvs = concatMap (\(q, v) -> map (formatCircleVertices q) $ genCornerCoords q v) $ zip centers vs
     genCornerCoords q v @ (V2 vx vy) = [q, q + v, q + (V2 (-vy) vx)]
 
-convertDrawing (PathDrawing lineStyle trans (Arc p0 radius startAngle endAngle)) = VertexGroups [] [] vertices []
+convertDrawing (PathDrawing lineStyle (Arc p0 radius startAngle endAngle)) = VertexGroups [] [] vertices []
     where
     LineStyle lineColor lineWidth = lineStyle
     V2 x y = p0
@@ -151,11 +151,11 @@ convertDrawing (PathDrawing lineStyle trans (Arc p0 radius startAngle endAngle))
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = concatMap (map format) $ xs
 
-convertDrawing (PathDrawing _ _ (StripPath [])) = VertexGroups [] [] [] []
+convertDrawing (PathDrawing _ (StripPath [])) = VertexGroups [] [] [] []
 
-convertDrawing (PathDrawing _ _ (StripPath (_ : []))) = VertexGroups [] [] [] []
+convertDrawing (PathDrawing _ (StripPath (_ : []))) = VertexGroups [] [] [] []
 
-convertDrawing (PathDrawing lineStyle trans (StripPath (p0 : p1 : ps))) = VertexGroups [] [] [] vertices
+convertDrawing (PathDrawing lineStyle (StripPath (p0 : p1 : ps))) = VertexGroups [] [] [] vertices
     where
     LineStyle lineColor lineWidth = lineStyle
     segs = zip (p0 : p1 : ps) (p1 : ps)

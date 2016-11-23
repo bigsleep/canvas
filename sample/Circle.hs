@@ -36,7 +36,7 @@ main = do
                 r = 1
                 circle = Circle (V2 x0 y0) radius
                 style = ShapeStyle (Just lineStyle) (FillStyle $ V4 r 0 0 1)
-            return $ ShapeDrawing style [] circle
+            return $ ShapeDrawing style circle
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings
         init = do
