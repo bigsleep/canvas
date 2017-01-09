@@ -11,6 +11,8 @@ module Graphics.Canvas.Rendering.OpenGL.Vertex
     , arcVertex
     , LineVertex
     , lineVertex
+    , TexturedVertex
+    , texturedVertex
     , alignOffset
     ) where
 
@@ -180,7 +182,7 @@ instance (Storable (WrapRecord xs), Forall (KeyValue KnownSymbol IsVertexAttrib)
               return . Comp . Const' $ VertexField location name glDataType num size offset' ihandling
         r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol IsVertexAttrib)) f
 
-mkField "prevPosition position nextPosition color lineColor bottomLineWidth topLineWidth lineFlags lineWidth center radius startAngle endAngle otherEndPosition jointEndPosition miterLimit positionType"
+mkField "prevPosition position nextPosition color lineColor bottomLineWidth topLineWidth lineFlags lineWidth center radius startAngle endAngle otherEndPosition jointEndPosition miterLimit positionType textureCoord"
 
 type TriangleVertexFields =
     '[ "prevPosition" ':> V2 Float
@@ -356,3 +358,37 @@ instance Storable LineVertex where
 
 instance Vertex LineVertex where
     vertexSpec _ = lineVertexSpec
+
+
+type TexturedVertexFields =
+    '[ "position" ':> V2 Float
+    , "textureCoord" ':> V2 Float
+    ]
+
+type TexturedVertexRecord = Record TexturedVertexFields
+
+newtype TexturedVertex = TexturedVertex TexturedVertexRecord deriving (Show)
+
+texturedVertex :: V2 Float -> V2 Float -> TexturedVertex
+texturedVertex position' textureCoord' = TexturedVertex
+    $ position @= position'
+    <: textureCoord @= textureCoord'
+    <: Nil
+
+sizeOfTexturedVertex :: Int
+sizeOfTexturedVertex = sizeOf (undefined :: WrapRecord TexturedVertexFields)
+
+alignmentOfTexturedVertex :: Int
+alignmentOfTexturedVertex = alignment (undefined :: WrapRecord TexturedVertexFields)
+
+texturedVertexSpec :: VertexSpec
+texturedVertexSpec = vertexSpec (Proxy :: Proxy TexturedVertexRecord)
+
+instance Storable TexturedVertex where
+    sizeOf _ = sizeOfTexturedVertex
+    alignment _ = alignmentOfTexturedVertex
+    peek ptr = (TexturedVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
+    poke ptr (TexturedVertex v) = poke (castPtr ptr) (WrapRecord v)
+
+instance Vertex TexturedVertex where
+    vertexSpec _ = texturedVertexSpec
