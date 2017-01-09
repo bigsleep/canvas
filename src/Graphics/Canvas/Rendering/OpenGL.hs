@@ -79,7 +79,7 @@ convertDrawing (ShapeDrawing shapeStyle (Triangle p0 p1 p2)) = VertexGroups vert
     (lineColor, lineWidth, lineFlags) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0, 0)
         Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine1 .|. triangleBottomLine2)
-    FillStyle fillColor = shapeStyleFillStyle shapeStyle
+    PlainColorFillStyle fillColor = shapeStyleFillStyle shapeStyle
     vs = take 3 $ iterate rotate (p0, p1, p2)
     format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
     vertices = map format vs
@@ -92,7 +92,7 @@ convertDrawing (ShapeDrawing shapeStyle (Rectangle p0 width height)) = VertexGro
     (lineColor, lineWidth, lineFlags) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0, 0)
         Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2)
-    FillStyle fillColor = shapeStyleFillStyle shapeStyle
+    PlainColorFillStyle fillColor = shapeStyleFillStyle shapeStyle
     vertices = genRectVertices fillColor lineColor lineWidth lineWidth lineFlags lineFlags p0 width height
 
 convertDrawing (ShapeDrawing _ (Circle _ radius)) | radius <= 0 = mempty
@@ -103,7 +103,7 @@ convertDrawing (ShapeDrawing shapeStyle (Circle p0 radius)) = VertexGroups [] ve
     (lineColor, lineWidth) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0)
         Just (LineStyle c w) -> (c, w)
-    FillStyle fillColor = shapeStyleFillStyle shapeStyle
+    PlainColorFillStyle fillColor = shapeStyleFillStyle shapeStyle
     V2 x y = p0
     r' = radius * 1.16
     m = V2 (V3 r' 0 x)
@@ -123,7 +123,7 @@ convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = V
     V2 x y = p0
     lineStyle = shapeStyleLineStyle shapeStyle
     LineStyle lineColor lineWidth = fromMaybe (LineStyle (V4 0 0 0 0) 0) lineStyle
-    FillStyle fillColor = shapeStyleFillStyle shapeStyle
+    PlainColorFillStyle fillColor = shapeStyleFillStyle shapeStyle
     rectLineFlag = if lineWidth > radius
         then triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2
         else 0

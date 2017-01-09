@@ -31,7 +31,7 @@ main = do
                 y0 = fromIntegral j * dy
                 r = 1.0
                 rectangle = RoundRect (V2 x0 y0) (0.5 * dx) (0.5 * dy) cornerRadius
-                style = ShapeStyle (Just lineStyle) (FillStyle $ V4 r 0 0 1.0)
+                style = ShapeStyle (Just lineStyle) (PlainColorFillStyle $ V4 r 0 0 1.0)
             return $ ShapeDrawing style rectangle
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings

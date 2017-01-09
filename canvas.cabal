@@ -21,6 +21,7 @@ library
                      , Graphics.Canvas.Rendering.OpenGL.Vertex
   build-depends:       base >= 4.7 && < 5
                      , bytestring
+                     , text
                      , linear
                      , OpenGL
                      , file-embed

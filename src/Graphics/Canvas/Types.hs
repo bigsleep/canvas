@@ -12,7 +12,8 @@ module Graphics.Canvas.Types
     , Canvas(..)
     ) where
 
-import Linear (V2, V4(..), M22)
+import Data.Text (Text)
+import Linear (V2, V3, V4(..), M22)
 
 type Coord = V2 Float
 
@@ -44,9 +45,9 @@ data LineStyle = LineStyle
     }
     deriving (Show, Read, Eq)
 
-data FillStyle = FillStyle
-    { fillStyleColor :: !Color
-    }
+data FillStyle
+    = PlainColorFillStyle !Color
+    | TexturedFillStyle !TextureRange
     deriving (Show, Read, Eq)
 
 data Transform
@@ -69,4 +70,10 @@ data Canvas
     , canvasWidth :: !Float
     , canvasHeight :: !Float
     , canvasDrawings :: ![Drawing]
+    } deriving (Show, Read, Eq)
+
+data TextureRange = TextureRange
+    { trTextureName :: !Text
+    , trTextureLeftUp :: !Coord
+    , trTextureRightDown :: !Coord
     } deriving (Show, Read, Eq)
