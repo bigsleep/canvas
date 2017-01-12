@@ -63,6 +63,7 @@ data RenderResource = RenderResource
     , rrCircleProgramInfo :: !ProgramInfo
     , rrArcProgramInfo :: !ProgramInfo
     , rrLineProgramInfo :: !ProgramInfo
+    , rrTexturedProgramInfo :: !ProgramInfo
     } deriving (Show)
 
 data VertexGroups = VertexGroups
@@ -70,11 +71,12 @@ data VertexGroups = VertexGroups
     , vgCircleVertex :: ![CircleVertex]
     , vgArcVertex :: ![ArcVertex]
     , vgLineVertex :: ![LineVertex]
+    , vgTexturedVertex :: ![TexturedVertex]
     } deriving (Show)
 
 instance Monoid VertexGroups where
-    mappend (VertexGroups as bs cs ds) (VertexGroups as' bs' cs' ds') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs') (ds ++ ds')
-    mempty = VertexGroups [] [] [] []
+    mappend (VertexGroups as bs cs ds es) (VertexGroups as' bs' cs' ds' es') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs') (ds ++ ds') (es ++ es')
+    mempty = VertexGroups [] [] [] [] []
 
 convertDrawing :: Drawing -> VertexGroups
 convertDrawing (ShapeDrawing shapeStyle (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
@@ -227,14 +229,15 @@ allocateRenderInfo
     -> [Drawing]
     -> ResourceT IO [RenderInfo]
 allocateRenderInfo resource drawings = sequence
-    [ mkRenderInfo triangleSource tvs
-    , mkRenderInfo circleSource cvs
-    , mkRenderInfo arcSource avs
-    , mkRenderInfo lineSource lvs
+    [ mkRenderInfo p1 vs1
+    , mkRenderInfo p2 vs2
+    , mkRenderInfo p3 vs3
+    , mkRenderInfo p4 vs4
+    , mkRenderInfo p5 vs5
     ]
     where
-    RenderResource triangleSource circleSource arcSource lineSource = resource
-    VertexGroups tvs cvs avs lvs = fold . map convertDrawing $ drawings
+    RenderResource p1 p2 p3 p4 p5 = resource
+    VertexGroups vs1 vs2 vs3 vs4 vs5 = fold . map convertDrawing $ drawings
     mkBuffer bufferTarget xs = do
         let n = length xs
             size = fromIntegral $ n * sizeOf (head xs)
@@ -286,7 +289,8 @@ allocateRenderResource = do
     circleProgram <- allocateCircleProgram
     arcProgram <- allocateArcProgram
     lineProgram <- allocateLineProgram
-    return (RenderResource triangleProgram circleProgram arcProgram lineProgram)
+    texturedProgram <- allocateTexturedProgram
+    return (RenderResource triangleProgram circleProgram arcProgram lineProgram texturedProgram)
 
 allocateProgramInfo
     :: BS.ByteString
@@ -360,6 +364,20 @@ allocateLineProgram = allocateProgramInfo
 
     where
     vfs = vertexFields $ vertexSpec (Proxy :: Proxy LineVertex)
+    uniformNames =
+        [ "projectionMatrix"
+        , "modelViewMatrix"
+        ]
+
+allocateTexturedProgram :: ResourceT IO ProgramInfo
+allocateTexturedProgram = allocateProgramInfo
+    $(embedFile "shader/textured-vertex.glsl")
+    $(embedFile "shader/textured-fragment.glsl")
+    vfs
+    uniformNames
+
+    where
+    vfs = vertexFields $ vertexSpec (Proxy :: Proxy TexturedVertex)
     uniformNames =
         [ "projectionMatrix"
         , "modelViewMatrix"
