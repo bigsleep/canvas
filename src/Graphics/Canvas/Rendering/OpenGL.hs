@@ -434,6 +434,29 @@ allocateProgram shaders = do
         GL.deleteObjectName program
 
 
+allocateTexImage2D
+    :: GL.Proxy
+    -> GL.Level
+    -> GL.PixelInternalFormat
+    -> GL.TextureSize2D
+    -> GL.Border
+    -> GL.PixelData a
+    -> ResourceT IO GL.TextureObject
+allocateTexImage2D proxy level format size boader texData = do
+    (_, texture) <- Resource.allocate mkTexture GL.deleteObjectName
+    return texture
+
+    where
+    mkTexture = do
+        texture <- GL.genObjectName
+        liftIO $ do
+            GL.activeTexture GL.$= (GL.TextureUnit 0)
+            GL.textureBinding GL.Texture2D GL.$= Just texture
+            GL.textureFilter GL.Texture2D GL.$= ((GL.Linear', Nothing), GL.Linear')
+            GL.texImage2D GL.Texture2D proxy level format size boader texData
+        return texture
+
+
 checkStatus
     :: (a -> GL.GettableStateVar Bool)
     -> (a -> GL.GettableStateVar String)
