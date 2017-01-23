@@ -6,7 +6,7 @@ module Graphics.Canvas.Types
     , ShapeStyle(..)
     , LineStyle(..)
     , FillStyle(..)
-
+    , TextureRange(..)
     , Transforms
     , Drawing(..)
     , Canvas(..)

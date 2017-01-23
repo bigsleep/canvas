@@ -14,19 +14,24 @@ module Graphics.Canvas.Rendering.OpenGL
     , allocateShader
     , allocateProgram
     , allocateRenderResource
+    , addTextureResource
     ) where
 
 import Control.Exception (throwIO)
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Resource (ResourceT)
 import qualified Control.Monad.Trans.Resource as Resource (allocate, runResourceT)
 import Data.Bits hiding (rotate)
 import qualified Data.ByteString as BS
 import Data.FileEmbed (embedFile)
-import Data.Foldable (Foldable(..), foldrM)
-import Data.Maybe (fromMaybe)
+import Data.Foldable (Foldable(..), for_, foldrM)
+import qualified Data.List as List (groupBy)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe, catMaybes, isJust)
 import Data.Proxy (Proxy(..))
+import Data.Text (Text)
 import Foreign.Marshal.Array (withArray)
 import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (Storable(..), sizeOf)
@@ -59,15 +64,26 @@ data RenderInfo = RenderInfo
     , riVertexBuffer :: !GL.BufferObject
     , riIndex :: !GL.ArrayIndex
     , riNum :: !GL.NumArrayIndices
-    , rrUniformInfos :: ![UniformInfo]
+    , riUniformInfos :: ![UniformInfo]
+    , riTexture :: !(Maybe GL.TextureObject)
+    }
+
+data RenderProgramInfos = RenderProgramInfos
+    { rpiTriangleProgramInfo :: !ProgramInfo
+    , rpiCircleProgramInfo :: !ProgramInfo
+    , rpiArcProgramInfo :: !ProgramInfo
+    , rpiLineProgramInfo :: !ProgramInfo
+    , rpiTexturedProgramInfo :: !ProgramInfo
     } deriving (Show)
 
 data RenderResource = RenderResource
-    { rrTriangleProgramInfo :: !ProgramInfo
-    , rrCircleProgramInfo :: !ProgramInfo
-    , rrArcProgramInfo :: !ProgramInfo
-    , rrLineProgramInfo :: !ProgramInfo
-    , rrTexturedProgramInfo :: !ProgramInfo
+    { rrRenderProgramInfos :: !RenderProgramInfos
+    , rrTextures :: !(Map Text GL.TextureObject)
+    } deriving (Show)
+
+data TexturedVertexUnit = TexturedVertexUnit
+    { tvuTextureName :: !Text
+    , tvuVertex :: ![TexturedVertex]
     } deriving (Show)
 
 data VertexGroups = VertexGroups
@@ -75,7 +91,7 @@ data VertexGroups = VertexGroups
     , vgCircleVertex :: ![CircleVertex]
     , vgArcVertex :: ![ArcVertex]
     , vgLineVertex :: ![LineVertex]
-    , vgTexturedVertex :: ![TexturedVertex]
+    , vgTexturedVertex :: ![TexturedVertexUnit]
     } deriving (Show)
 
 instance Monoid VertexGroups where
@@ -83,37 +99,36 @@ instance Monoid VertexGroups where
     mempty = VertexGroups [] [] [] [] []
 
 convertDrawing :: Drawing -> VertexGroups
-convertDrawing (ShapeDrawing shapeStyle (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
+convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
     where
-    lineStyle = shapeStyleLineStyle shapeStyle
     (lineColor, lineWidth, lineFlags) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0, 0)
         Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine1 .|. triangleBottomLine2)
-    PlainColorFillStyle fillColor = shapeStyleFillStyle shapeStyle
     vs = take 3 $ iterate rotate (p0, p1, p2)
     format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
     vertices = map format vs
 
+convertDrawing (ShapeDrawing (ShapeStyle _ (TexturedFillStyle textureRange)) (Triangle p0 p1 p2)) = mempty { vgTexturedVertex = [vertices] }
+    where
+    TextureRange textureName (V2 x0 y0) (V2 x1 y1) = textureRange
+    vertices = TexturedVertexUnit textureName [texturedVertex p0 (V2 x0 y0), texturedVertex p1 (V2 x0 y1), texturedVertex p2 (V2 x1 y0)]
+
 convertDrawing (ShapeDrawing _ (Rectangle _ width height)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
 
-convertDrawing (ShapeDrawing shapeStyle (Rectangle p0 width height)) = mempty { vgTriangleVertex = vertices }
+convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Rectangle p0 width height)) = mempty { vgTriangleVertex = vertices }
     where
-    lineStyle = shapeStyleLineStyle shapeStyle
     (lineColor, lineWidth, lineFlags) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0, 0)
         Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2)
-    PlainColorFillStyle fillColor = shapeStyleFillStyle shapeStyle
     vertices = genRectVertices fillColor lineColor lineWidth lineWidth lineFlags lineFlags p0 width height
 
 convertDrawing (ShapeDrawing _ (Circle _ radius)) | radius <= 0 = mempty
 
-convertDrawing (ShapeDrawing shapeStyle (Circle p0 radius)) = mempty { vgCircleVertex = vertices }
+convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Circle p0 radius)) = mempty { vgCircleVertex = vertices }
     where
-    lineStyle = shapeStyleLineStyle shapeStyle
     (lineColor, lineWidth) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0)
         Just (LineStyle c w) -> (c, w)
-    PlainColorFillStyle fillColor = shapeStyleFillStyle shapeStyle
     V2 x y = p0
     r' = radius * 1.16
     m = V2 (V3 r' 0 x)
@@ -233,15 +248,16 @@ allocateRenderInfo
     -> [Uniform]
     -> [Drawing]
     -> ResourceT IO [RenderInfo]
-allocateRenderInfo resource uniforms drawings = sequence
+allocateRenderInfo resource uniforms drawings = sequence $
     [ mkRenderInfo p1 vs1
     , mkRenderInfo p2 vs2
     , mkRenderInfo p3 vs3
     , mkRenderInfo p4 vs4
-    , mkRenderInfo p5 vs5
     ]
+    ++
+    catMaybes (map (mkRenderInfoTvu p5) tvuGroups)
     where
-    RenderResource p1 p2 p3 p4 p5 = resource
+    RenderResource (RenderProgramInfos p1 p2 p3 p4 p5) ts = resource
     VertexGroups vs1 vs2 vs3 vs4 vs5 = fold . map convertDrawing $ drawings
     mkBuffer bufferTarget xs = do
         let n = length xs
@@ -251,11 +267,21 @@ allocateRenderInfo resource uniforms drawings = sequence
         withArray xs $ \ptr -> GL.bufferData bufferTarget GL.$= (size, ptr, GL.StreamDraw)
         GL.bindBuffer bufferTarget GL.$= Nothing
         return buffer
-    mkRenderInfo source vs = do
+    mkRenderInfo program vs = do
         (_, buffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
-        let ProgramInfo _ _ uniformLocations = source
+        let ProgramInfo _ _ uniformLocations = program
             uniformInfos = zipWith UniformInfo uniformLocations uniforms
-        return $ RenderInfo source GL.Triangles buffer 0 (fromIntegral $ length vs) uniformInfos
+        return $ RenderInfo program GL.Triangles buffer 0 (fromIntegral $ length vs) uniformInfos Nothing
+    tvuGroups = List.groupBy (\a b -> tvuTextureName a == tvuTextureName b) vs5
+    mkRenderInfoTvu _ [] = Nothing
+    mkRenderInfoTvu program xs @ (x : _) = Just $ do
+        let tname = tvuTextureName x
+            texture = Map.lookup tname ts
+            vs = concatMap tvuVertex xs
+            ProgramInfo _ _ uniformLocations = program
+            uniformInfos = zipWith UniformInfo uniformLocations (uniforms ++ [Uniform (GL.TextureUnit 0)])
+        (_, buffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
+        return $ RenderInfo program GL.Triangles buffer 0 (fromIntegral $ length vs) uniformInfos texture
 
 render :: RenderResource -> Canvas -> IO ()
 render resource (Canvas (V2 ox oy) w h drawings) =
@@ -279,14 +305,20 @@ renderInternal
 renderInternal info = do
     GL.currentProgram GL.$= Just program
     GL.bindBuffer GL.ArrayBuffer GL.$= Just vertexBuffer
+    when (isJust texture) $ do
+        GL.activeTexture GL.$= (GL.TextureUnit 0)
+        GL.textureBinding GL.Texture2D GL.$= texture
     mapM_ bindAttrib attribs
     mapM_ bindUniform uniforms
     GL.drawArrays mode (fromIntegral index) (fromIntegral num)
+    GL.textureBinding GL.Texture2D GL.$= Nothing
     GL.bindBuffer GL.ArrayBuffer GL.$= Nothing
+    when (isJust texture) $ do
+        GL.textureBinding GL.Texture2D GL.$= Nothing
     mapM_ unbindAttrib attribs
 
     where
-    RenderInfo programInfo mode vertexBuffer index num uniforms = info
+    RenderInfo programInfo mode vertexBuffer index num uniforms texture = info
     ProgramInfo program attribs _ = programInfo
 
 allocateRenderResource :: ResourceT IO RenderResource
@@ -296,7 +328,7 @@ allocateRenderResource = do
     arcProgram <- allocateArcProgram
     lineProgram <- allocateLineProgram
     texturedProgram <- allocateTexturedProgram
-    return (RenderResource triangleProgram circleProgram arcProgram lineProgram texturedProgram)
+    return (RenderResource (RenderProgramInfos triangleProgram circleProgram arcProgram lineProgram texturedProgram) Map.empty)
 
 allocateProgramInfo
     :: BS.ByteString
@@ -455,6 +487,21 @@ allocateTexImage2D proxy level format size boader texData = do
             GL.textureFilter GL.Texture2D GL.$= ((GL.Linear', Nothing), GL.Linear')
             GL.texImage2D GL.Texture2D proxy level format size boader texData
         return texture
+
+
+addTextureResource
+    :: Text
+    -> GL.Proxy
+    -> GL.Level
+    -> GL.PixelInternalFormat
+    -> GL.TextureSize2D
+    -> GL.Border
+    -> GL.PixelData a
+    -> RenderResource
+    -> ResourceT IO RenderResource
+addTextureResource textureName proxy level format size boader texData rr @ (RenderResource _ ts) = do
+    texture <- allocateTexImage2D proxy level format size boader texData
+    return $ rr { rrTextures = Map.insert textureName texture ts }
 
 
 checkStatus

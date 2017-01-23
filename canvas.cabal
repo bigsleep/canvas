@@ -21,6 +21,7 @@ library
                      , Graphics.Canvas.Rendering.OpenGL.Vertex
   build-depends:       base >= 4.7 && < 5
                      , bytestring
+                     , containers
                      , text
                      , linear
                      , OpenGL
@@ -97,6 +98,18 @@ executable arc-sample
 executable strippath-sample
   hs-source-dirs:      sample
   main-is:             StripPath.hs
+  build-depends:       base >= 4.7 && < 5
+                     , linear
+                     , OpenGL
+                     , GLFW-b
+                     , canvas
+                     , transformers
+                     , resourcet
+  default-language:    Haskell2010
+
+executable texture-sample
+  hs-source-dirs:      sample
+  main-is:             Texture.hs
   build-depends:       base >= 4.7 && < 5
                      , linear
                      , OpenGL
