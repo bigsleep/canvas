@@ -33,10 +33,13 @@ import Foreign.Storable (Storable(..), sizeOf)
 import Graphics.Canvas.Types
 import Graphics.Canvas.Rendering.OpenGL.Vertex
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V2(..), V3(..), V4(..), M22, (!*), ortho, lookAt, nearZero)
+import Linear (V2(..), V3(..), V4(..), M22, M44, (!*), ortho, lookAt, nearZero)
 
-data UniformInfo = forall a. (GL.Uniform a, Show a) => UniformInfo !GL.UniformLocation !a
-deriving instance Show UniformInfo
+data Uniform = forall a. (GL.Uniform a, Show a) => Uniform !a
+deriving instance Show Uniform
+
+data UniformInfo = UniformInfo !GL.UniformLocation !Uniform
+    deriving (Show)
 
 data AttribInfo = AttribInfo
     { aiAttribLocation :: !GL.AttribLocation
@@ -56,6 +59,7 @@ data RenderInfo = RenderInfo
     , riVertexBuffer :: !GL.BufferObject
     , riIndex :: !GL.ArrayIndex
     , riNum :: !GL.NumArrayIndices
+    , rrUniformInfos :: ![UniformInfo]
     } deriving (Show)
 
 data RenderResource = RenderResource
@@ -226,9 +230,10 @@ genRectVertices fillColor lineColor bottomLineWidth topLineWidth lineFlags0 line
 
 allocateRenderInfo
     :: RenderResource
+    -> [Uniform]
     -> [Drawing]
     -> ResourceT IO [RenderInfo]
-allocateRenderInfo resource drawings = sequence
+allocateRenderInfo resource uniforms drawings = sequence
     [ mkRenderInfo p1 vs1
     , mkRenderInfo p2 vs2
     , mkRenderInfo p3 vs3
@@ -248,28 +253,30 @@ allocateRenderInfo resource drawings = sequence
         return buffer
     mkRenderInfo source vs = do
         (_, buffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
-        return $ RenderInfo source GL.Triangles buffer 0 (fromIntegral $ length vs)
+        let ProgramInfo _ _ uniformLocations = source
+            uniformInfos = zipWith UniformInfo uniformLocations uniforms
+        return $ RenderInfo source GL.Triangles buffer 0 (fromIntegral $ length vs) uniformInfos
 
 render :: RenderResource -> Canvas -> IO ()
 render resource (Canvas (V2 ox oy) w h drawings) =
     Resource.runResourceT $ do
-        rs <- allocateRenderInfo resource drawings
+        ms <- liftIO . mapM mkMat $ [projectionMatrix, modelViewMatrix]
+        let us = map Uniform ms
+        rs <- allocateRenderInfo resource us drawings
         liftIO $ do
-            pm <- GL.newMatrix GL.RowMajor . concatMap toList . toList $ projectionMatrix
-            mvm <- GL.newMatrix GL.RowMajor . concatMap toList . toList $ modelViewMatrix
             GL.blend GL.$= GL.Enabled
             GL.blendFunc GL.$= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
-            mapM_ (renderInternal pm mvm) rs
+            mapM_ renderInternal rs
     where
     projectionMatrix = ortho ox (ox + w) oy (oy + h) 1 (-1)
     modelViewMatrix = lookAt (V3 0 0 1) (V3 0 0 0) (V3 0 1 0)
+    mkMat :: M44 Float -> IO (GL.GLmatrix GL.GLfloat)
+    mkMat = GL.newMatrix GL.RowMajor . concatMap toList . toList
 
 renderInternal
-    :: GL.GLmatrix GL.GLfloat
-    -> GL.GLmatrix GL.GLfloat
-    -> RenderInfo
+    :: RenderInfo
     -> IO ()
-renderInternal pm mvm info = do
+renderInternal info = do
     GL.currentProgram GL.$= Just program
     GL.bindBuffer GL.ArrayBuffer GL.$= Just vertexBuffer
     mapM_ bindAttrib attribs
@@ -279,9 +286,8 @@ renderInternal pm mvm info = do
     mapM_ unbindAttrib attribs
 
     where
-    RenderInfo programInfo mode vertexBuffer index num = info
-    ProgramInfo program attribs uniformLocations = programInfo
-    uniforms = zipWith UniformInfo uniformLocations [pm, mvm]
+    RenderInfo programInfo mode vertexBuffer index num uniforms = info
+    ProgramInfo program attribs _ = programInfo
 
 allocateRenderResource :: ResourceT IO RenderResource
 allocateRenderResource = do
@@ -397,7 +403,7 @@ unbindAttrib vai =
     GL.vertexAttribArray (aiAttribLocation vai) GL.$= GL.Disabled
 
 bindUniform :: UniformInfo -> IO ()
-bindUniform (UniformInfo l u) =
+bindUniform (UniformInfo l (Uniform u)) =
     GL.uniform l GL.$= u
 
 allocateShader :: GL.ShaderType -> BS.ByteString -> ResourceT IO GL.Shader
