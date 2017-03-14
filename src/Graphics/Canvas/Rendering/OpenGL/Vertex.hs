@@ -5,8 +5,6 @@ module Graphics.Canvas.Rendering.OpenGL.Vertex
     , Vertex(..)
     , TriangleVertex
     , triangleVertex
-    , CircleVertex
-    , circleVertex
     , ArcVertex
     , arcVertex
     , LineVertex
@@ -229,53 +227,11 @@ instance Storable TriangleVertex where
 instance Vertex TriangleVertex where
     vertexSpec _ = triangleVertexSpec
 
-
-type CircleVertexFields =
-    '[ "position" ':> V2 Float
-    , "center" ':> V2 Float
-    , "radius" ':> Float
-    , "color" ':> V4 Float
-    , "lineColor" ':> V4 Float
-    , "lineWidth" ':> Float
-    ]
-
-type CircleVertexRecord = Record CircleVertexFields
-
-newtype CircleVertex = CircleVertex CircleVertexRecord deriving (Show)
-
-circleVertex :: V2 Float -> V2 Float -> Float -> V4 Float -> V4 Float -> Float -> CircleVertex
-circleVertex position' center' radius' color' lineColor' lineWidth' = CircleVertex
-    $ position @= position'
-    <: center @= center'
-    <: radius @= radius'
-    <: color @= color'
-    <: lineColor @= lineColor'
-    <: lineWidth @= lineWidth'
-    <: Nil
-
-sizeOfCircleVertex :: Int
-sizeOfCircleVertex = sizeOf (undefined :: WrapRecord CircleVertexFields)
-
-alignmentOfCircleVertex :: Int
-alignmentOfCircleVertex = alignment (undefined :: WrapRecord CircleVertexFields)
-
-circleVertexSpec :: VertexSpec
-circleVertexSpec = vertexSpec (Proxy :: Proxy CircleVertexRecord)
-
-instance Storable CircleVertex where
-    sizeOf _ = sizeOfCircleVertex
-    alignment _ = alignmentOfCircleVertex
-    peek ptr = (CircleVertex . unWrapRecord) `fmap` (peek . castPtr $ ptr)
-    poke ptr (CircleVertex v) = poke (castPtr ptr) (WrapRecord v)
-
-instance Vertex CircleVertex where
-    vertexSpec _ = circleVertexSpec
-
-
 type ArcVertexFields =
     '[ "position" ':> V2 Float
     , "center" ':> V2 Float
     , "radius" ':> Float
+    , "color" ':> V4 Float
     , "lineColor" ':> V4 Float
     , "lineWidth" ':> Float
     , "startAngle" ':> Float
@@ -286,11 +242,12 @@ type ArcVertexRecord = Record ArcVertexFields
 
 newtype ArcVertex = ArcVertex ArcVertexRecord deriving (Show)
 
-arcVertex :: V2 Float -> V2 Float -> Float -> V4 Float -> Float -> Float -> Float -> ArcVertex
-arcVertex position' center' radius' lineColor' lineWidth' startAngle' endAngle' = ArcVertex
+arcVertex :: V2 Float -> V2 Float -> Float -> V4 Float -> V4 Float -> Float -> Float -> Float -> ArcVertex
+arcVertex position' center' radius' color' lineColor' lineWidth' startAngle' endAngle' = ArcVertex
     $ position @= position'
     <: center @= center'
     <: radius @= radius'
+    <: color @= color'
     <: lineColor @= lineColor'
     <: lineWidth @= lineWidth'
     <: startAngle @= startAngle'

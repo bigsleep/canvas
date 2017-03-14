@@ -70,7 +70,6 @@ data RenderInfo = RenderInfo
 
 data RenderProgramInfos = RenderProgramInfos
     { rpiTriangleProgramInfo :: !ProgramInfo
-    , rpiCircleProgramInfo :: !ProgramInfo
     , rpiArcProgramInfo :: !ProgramInfo
     , rpiLineProgramInfo :: !ProgramInfo
     , rpiTexturedProgramInfo :: !ProgramInfo
@@ -88,15 +87,14 @@ data TexturedVertexUnit = TexturedVertexUnit
 
 data VertexGroups = VertexGroups
     { vgTriangleVertex :: ![TriangleVertex]
-    , vgCircleVertex :: ![CircleVertex]
     , vgArcVertex :: ![ArcVertex]
     , vgLineVertex :: ![LineVertex]
     , vgTexturedVertex :: ![TexturedVertexUnit]
     } deriving (Show)
 
 instance Monoid VertexGroups where
-    mappend (VertexGroups as bs cs ds es) (VertexGroups as' bs' cs' ds' es') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs') (ds ++ ds') (es ++ es')
-    mempty = VertexGroups [] [] [] [] []
+    mappend (VertexGroups as bs cs ds) (VertexGroups as' bs' cs' ds') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs') (ds ++ ds')
+    mempty = VertexGroups [] [] [] []
 
 convertDrawing :: Drawing -> VertexGroups
 convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
@@ -124,7 +122,7 @@ convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColo
 
 convertDrawing (ShapeDrawing _ (Circle _ radius)) | radius <= 0 = mempty
 
-convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Circle p0 radius)) = mempty { vgCircleVertex = vertices }
+convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Circle p0 radius)) = mempty { vgArcVertex = vertices }
     where
     (lineColor, lineWidth) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0)
@@ -134,7 +132,7 @@ convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColo
     m = V2 (V3 r' 0 x)
            (V3 0 r' y)
     vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
-    format q = circleVertex q p0 radius fillColor lineColor lineWidth
+    format q = arcVertex q p0 radius fillColor lineColor lineWidth 0 (pi * 2)
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = concatMap (map format) xs
 
@@ -142,7 +140,7 @@ convertDrawing (ShapeDrawing _ (RoundRect _ width height _)) | width <= 0 || hei
 
 convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius)) | nearZero radius = convertDrawing (ShapeDrawing shapeStyle (Rectangle p0 width height))
 
-convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = mempty { vgTriangleVertex = tvs, vgCircleVertex = cvs }
+convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = mempty { vgTriangleVertex = tvs, vgArcVertex = avs }
     where
     radius = radius' `min` (height * 0.5) `min` (width * 0.5)
     V2 x y = p0
@@ -160,19 +158,20 @@ convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = m
         ++ genRect rectLineFlag rectLineFlag (max 0 (lineWidth - radius)) (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
     vs = take 4 . iterate (\(V2 vx vy) -> (V2 (-vy) vx)) $ V2 (-radius * 1.5) 0
     centers = genRectCoords (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
-    formatCircleVertices q r = circleVertex r q radius fillColor lineColor lineWidth
-    cvs = concatMap (\(q, v) -> map (formatCircleVertices q) $ genCornerCoords q v) $ zip centers vs
+    formatArcVertices q r = arcVertex r q radius fillColor lineColor lineWidth 0 (pi * 2)
+    avs = concatMap (\(q, v) -> map (formatArcVertices q) $ genCornerCoords q v) $ zip centers vs
     genCornerCoords q v @ (V2 vx vy) = [q, q + v, q + V2 (-vy) vx]
 
 convertDrawing (PathDrawing lineStyle (Arc p0 radius startAngle endAngle)) = mempty { vgArcVertex = vertices }
     where
     LineStyle lineColor lineWidth = lineStyle
+    fillColor = V4 0 0 0 0
     V2 x y = p0
     r' = radius / sin (pi / 3)
     m = V2 (V3 r' 0 x)
            (V3 0 r' y)
     vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
-    format q = arcVertex q p0 radius lineColor lineWidth startAngle endAngle
+    format q = arcVertex q p0 radius fillColor lineColor lineWidth startAngle endAngle
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = concatMap (map format) xs
 
@@ -252,13 +251,12 @@ allocateRenderInfo resource uniforms drawings = sequence $
     [ mkRenderInfo p1 vs1
     , mkRenderInfo p2 vs2
     , mkRenderInfo p3 vs3
-    , mkRenderInfo p4 vs4
     ]
     ++
-    catMaybes (map (mkRenderInfoTvu p5) tvuGroups)
+    catMaybes (map (mkRenderInfoTvu p4) tvuGroups)
     where
-    RenderResource (RenderProgramInfos p1 p2 p3 p4 p5) ts = resource
-    VertexGroups vs1 vs2 vs3 vs4 vs5 = fold . map convertDrawing $ drawings
+    RenderResource (RenderProgramInfos p1 p2 p3 p4) ts = resource
+    VertexGroups vs1 vs2 vs3 vs4 = fold . map convertDrawing $ drawings
     mkBuffer bufferTarget xs = do
         let n = length xs
             size = fromIntegral $ n * sizeOf (head xs)
@@ -272,7 +270,7 @@ allocateRenderInfo resource uniforms drawings = sequence $
         let ProgramInfo _ _ uniformLocations = program
             uniformInfos = zipWith UniformInfo uniformLocations uniforms
         return $ RenderInfo program GL.Triangles buffer 0 (fromIntegral $ length vs) uniformInfos Nothing
-    tvuGroups = List.groupBy (\a b -> tvuTextureName a == tvuTextureName b) vs5
+    tvuGroups = List.groupBy (\a b -> tvuTextureName a == tvuTextureName b) vs4
     mkRenderInfoTvu _ [] = Nothing
     mkRenderInfoTvu program xs @ (x : _) = Just $ do
         let tname = tvuTextureName x
@@ -324,11 +322,10 @@ renderInternal info = do
 allocateRenderResource :: ResourceT IO RenderResource
 allocateRenderResource = do
     triangleProgram <- allocateTriangleProgram
-    circleProgram <- allocateCircleProgram
     arcProgram <- allocateArcProgram
     lineProgram <- allocateLineProgram
     texturedProgram <- allocateTexturedProgram
-    return (RenderResource (RenderProgramInfos triangleProgram circleProgram arcProgram lineProgram texturedProgram) Map.empty)
+    return (RenderResource (RenderProgramInfos triangleProgram arcProgram lineProgram texturedProgram) Map.empty)
 
 allocateProgramInfo
     :: BS.ByteString
@@ -360,20 +357,6 @@ allocateTriangleProgram = allocateProgramInfo
 
     where
     vfs = vertexFields . vertexSpec $ (Proxy :: Proxy TriangleVertex)
-    uniformNames =
-        [ "projectionMatrix"
-        , "modelViewMatrix"
-        ]
-
-allocateCircleProgram :: ResourceT IO ProgramInfo
-allocateCircleProgram = allocateProgramInfo
-    $(embedFile "shader/circle-vertex.glsl")
-    $(embedFile "shader/circle-fragment.glsl")
-    vfs
-    uniformNames
-
-    where
-    vfs = vertexFields . vertexSpec $ (Proxy :: Proxy CircleVertex)
     uniformNames =
         [ "projectionMatrix"
         , "modelViewMatrix"
