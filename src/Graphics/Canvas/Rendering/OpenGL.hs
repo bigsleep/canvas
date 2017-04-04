@@ -26,6 +26,8 @@ import Data.Bits hiding (rotate)
 import qualified Data.ByteString as BS
 import Data.FileEmbed (embedFile)
 import Data.Foldable (Foldable(..), for_, foldrM)
+import Data.Set (Set)
+import qualified Data.Set as Set
 import qualified Data.List as List (groupBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -224,6 +226,18 @@ circleVertices = vertices
     da = 2 * pi / fromIntegral division :: Float
     rmat = rotateMatrix da
     vertices = take division $ iterate (rmat !*) (V2 0 1)
+
+collectColors :: [Drawing] -> Set Color
+collectColors = Set.fromList . concat . map collectColorsOne
+
+collectColorsOne :: Drawing -> [Color]
+
+collectColorsOne (ShapeDrawing (ShapeStyle lineStyle fillStyle) _) = catMaybes $ fmap lineStyleColor lineStyle : getFillColor fillStyle : []
+    where
+    getFillColor (PlainColorFillStyle fillColor) = Just fillColor
+    getFillColor _ = Nothing
+
+collectColorsOne (PathDrawing lineStyle _) = [lineStyleColor lineStyle]
 
 genRectCoords :: Coord -> Float -> Float -> [Coord]
 genRectCoords p0 width height = [p0, p1, p2, p3]
