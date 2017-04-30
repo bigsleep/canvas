@@ -82,6 +82,7 @@ data RenderProgramInfos = RenderProgramInfos
 data RenderResource = RenderResource
     { rrRenderProgramInfos :: !RenderProgramInfos
     , rrTextures :: !(Map Text GL.TextureObject)
+    , rrPalette :: !Palette
     } deriving (Show)
 
 data TexturedVertexUnit = TexturedVertexUnit
@@ -234,6 +235,9 @@ circleVertices = vertices
     rmat = rotateMatrix da
     vertices = take division $ iterate (rmat !*) (V2 0 1)
 
+emptyPalette :: Palette
+emptyPalette = Palette Set.empty Vector.empty
+
 collectColors :: [Drawing] -> Set Color
 collectColors = Set.fromList . concat . map collectColorsOne
 
@@ -276,7 +280,7 @@ allocateRenderInfo resource uniforms drawings = sequence $
     ++
     catMaybes (map (mkRenderInfoTvu p4) tvuGroups)
     where
-    RenderResource (RenderProgramInfos p1 p2 p3 p4) ts = resource
+    RenderResource (RenderProgramInfos p1 p2 p3 p4) ts _ = resource
     VertexGroups vs1 vs2 vs3 vs4 = fold . map convertDrawing $ drawings
     mkBuffer bufferTarget xs = do
         let n = length xs
@@ -347,7 +351,7 @@ allocateRenderResource = do
     arcProgram <- allocateArcProgram
     lineProgram <- allocateLineProgram
     texturedProgram <- allocateTexturedProgram
-    return (RenderResource (RenderProgramInfos triangleProgram arcProgram lineProgram texturedProgram) Map.empty)
+    return (RenderResource (RenderProgramInfos triangleProgram arcProgram lineProgram texturedProgram) Map.empty emptyPalette)
 
 allocateProgramInfo
     :: BS.ByteString
@@ -470,7 +474,6 @@ allocateProgram shaders = do
         mapM_ (GL.detachShader program) shaders
         GL.deleteObjectName program
 
-
 allocateTexImage2D
     :: GL.Proxy
     -> GL.Level
@@ -493,7 +496,6 @@ allocateTexImage2D proxy level format size boader texData = do
             GL.texImage2D GL.Texture2D proxy level format size boader texData
         return texture
 
-
 addTextureResource
     :: Text
     -> GL.Proxy
@@ -504,10 +506,9 @@ addTextureResource
     -> GL.PixelData a
     -> RenderResource
     -> ResourceT IO RenderResource
-addTextureResource textureName proxy level format size boader texData rr @ (RenderResource _ ts) = do
+addTextureResource textureName proxy level format size boader texData rr @ (RenderResource _ ts _) = do
     texture <- allocateTexImage2D proxy level format size boader texData
     return $ rr { rrTextures = Map.insert textureName texture ts }
-
 
 checkStatus
     :: (a -> GL.GettableStateVar Bool)
@@ -521,7 +522,6 @@ checkStatus getStatus getInfoLog message object = do
         log' <- GL.get . getInfoLog $ object
         throwIO . userError $ message ++ ": " ++ log'
 
-
 rotateMatrix :: Float -> M22 Float
 rotateMatrix a = V2 (V2 cosa (-sina)) (V2 sina cosa)
     where
@@ -530,7 +530,6 @@ rotateMatrix a = V2 (V2 cosa (-sina)) (V2 sina cosa)
 
 rotate :: (a, a, a) -> (a, a, a)
 rotate (q0, q1, q2) = (q1, q2, q0)
-
 
 triangleBottomLine0 :: GL.GLuint
 triangleBottomLine0 = 1
