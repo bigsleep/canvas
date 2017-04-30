@@ -34,6 +34,8 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, catMaybes, isJust)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
+import Data.Vector.Unboxed (Vector)
+import qualified Data.Vector.Unboxed as Vector
 import Foreign.Marshal.Array (withArray)
 import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (Storable(..), sizeOf)
@@ -92,6 +94,11 @@ data VertexGroups = VertexGroups
     , vgArcVertex :: ![ArcVertex]
     , vgLineVertex :: ![LineVertex]
     , vgTexturedVertex :: ![TexturedVertexUnit]
+    } deriving (Show)
+
+data Palette = Palette
+    { paletteColors :: Set Color
+    , paletteStorage :: Vector Color
     } deriving (Show)
 
 instance Monoid VertexGroups where
