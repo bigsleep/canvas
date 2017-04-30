@@ -295,7 +295,7 @@ allocateRenderInfo resource uniforms drawings = sequence $
         (_, buffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
         return $ RenderInfo program GL.Triangles buffer 0 (fromIntegral $ length vs) uniformInfos texture
 
-render :: RenderResource -> Canvas -> IO ()
+render :: RenderResource -> Canvas -> IO RenderResource
 render resource (Canvas (V2 ox oy) w h drawings) =
     Resource.runResourceT $ do
         ms <- liftIO . mapM mkMat $ [projectionMatrix, modelViewMatrix]
@@ -305,6 +305,7 @@ render resource (Canvas (V2 ox oy) w h drawings) =
             GL.blend GL.$= GL.Enabled
             GL.blendFunc GL.$= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
             mapM_ renderInternal rs
+        return resource
     where
     projectionMatrix = ortho ox (ox + w) oy (oy + h) 1 (-1)
     modelViewMatrix = lookAt (V3 0 0 1) (V3 0 0 0) (V3 0 1 0)
