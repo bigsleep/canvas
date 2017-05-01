@@ -26,17 +26,18 @@ import Data.Bits hiding (rotate)
 import qualified Data.ByteString as BS
 import Data.FileEmbed (embedFile)
 import Data.Foldable (Foldable(..), for_, foldrM)
-import Data.Set (Set)
-import qualified Data.Set as Set
 import qualified Data.List as List (groupBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, catMaybes, isJust)
 import Data.Proxy (Proxy(..))
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text (Text)
-import Data.Vector.Unboxed (Vector)
-import qualified Data.Vector.Unboxed as Vector
-import Foreign.Marshal.Array (withArray)
+import Data.Vector.Storable (Vector)
+import qualified Data.Vector.Storable as Vector
+import Data.Word (Word8)
+import Foreign.Marshal.Array (withArray, copyArray)
 import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (Storable(..), sizeOf)
 import Graphics.Canvas.Types
@@ -98,8 +99,11 @@ data VertexGroups = VertexGroups
     } deriving (Show)
 
 data Palette = Palette
-    { paletteColors :: Set Color
-    , paletteStorage :: Vector Color
+    { paletteColors :: !(Set Color)
+    , paletteColorCoords :: !(Map Color (V2 Float))
+    , paletteStorage :: !(Vector Color)
+    , paletteTexture :: !GL.TextureObject
+    , palettePixelBufferObject :: !GL.BufferObject
     } deriving (Show)
 
 instance Monoid VertexGroups where
@@ -235,20 +239,76 @@ circleVertices = vertices
     rmat = rotateMatrix da
     vertices = take division $ iterate (rmat !*) (V2 0 1)
 
-emptyPalette :: Palette
-emptyPalette = Palette Set.empty Vector.empty
-
 collectColors :: [Drawing] -> Set Color
-collectColors = Set.fromList . concat . map collectColorsOne
+collectColors = Set.fromList . concatMap collectColorsOne
 
 collectColorsOne :: Drawing -> [Color]
-
 collectColorsOne (ShapeDrawing (ShapeStyle lineStyle fillStyle) _) = catMaybes $ fmap lineStyleColor lineStyle : getFillColor fillStyle : []
     where
     getFillColor (PlainColorFillStyle fillColor) = Just fillColor
     getFillColor _ = Nothing
 
 collectColorsOne (PathDrawing lineStyle _) = [lineStyleColor lineStyle]
+
+paletteSize :: (Int, Int)
+paletteSize = (1024, 1024)
+
+calcPaletteCoord :: Int -> V2 Float
+calcPaletteCoord i = V2 x y
+    where
+    (w, h) = paletteSize
+    x = fromIntegral (i `mod` w) / fromIntegral w
+    y = fromIntegral (i `div` w) / fromIntegral h
+
+allocatePalette :: ResourceT IO Palette
+allocatePalette = do
+    pbo <- allocatePixelBufferObject (w * h * colorByteSize)
+    texture <- allocateTexImage2D GL.NoProxy 0 GL.RGBA' size 0 pdata
+    return $ Palette Set.empty Map.empty Vector.empty texture pbo
+    where
+    (w, h) = paletteSize
+    size = GL.TextureSize2D (fromIntegral w) (fromIntegral h)
+    pdata = GL.PixelData GL.RGBA GL.UnsignedByte (Ptr.nullPtr :: Ptr.Ptr Word8)
+
+updatePalette :: Palette -> Set Color -> IO Palette
+updatePalette prev nextColors = do
+    updatePaletteTexture prev nextStorage
+    return nextPalette
+    where
+    Palette prevColors prevColorCoords prevStorage texture pbo = prev
+    prevLength = Vector.length prevStorage
+    newColors = Set.difference nextColors prevColors
+    nextStorage = (prevStorage Vector.++) . Vector.fromList . Set.elems $ newColors
+    nextColors = Set.union prevColors newColors
+    newColorCoords = Map.fromList $ zip (Set.toList newColors) (map calcPaletteCoord [prevLength..])
+    nextColorCoords = Map.union prevColorCoords newColorCoords
+    nextPalette = Palette nextColors nextColorCoords nextStorage texture pbo
+
+updatePaletteTexture :: Palette -> Vector Color -> IO ()
+updatePaletteTexture prev storage = do
+    GL.bindBuffer GL.PixelPackBuffer GL.$= Just pbo
+    GL.withMappedBuffer GL.PixelPackBuffer GL.ReadWrite writeAddedColors onUpdateFailure
+    GL.bindBuffer GL.PixelPackBuffer GL.$= Nothing
+
+    GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just pbo
+    GL.activeTexture GL.$= (GL.TextureUnit 0)
+    GL.textureBinding GL.Texture2D GL.$= Just texture
+    GL.texSubImage2D GL.Texture2D 0 pos size pdata
+    GL.bindBuffer GL.PixelUnpackBuffer GL.$= Nothing
+    where
+    Palette _ _ prevStorage texture pbo = prev
+    offset = Vector.length prevStorage * colorByteSize
+    writeAddedColors ptr =
+        let dest = Ptr.plusPtr ptr offset
+            len = Vector.length storage
+        in Vector.unsafeWith storage $
+            \source -> copyArray dest source len
+    onUpdateFailure failure =
+        throwIO . userError $ "mapBuffer failure: " ++ show failure
+    (w, h) = paletteSize
+    pos = GL.TexturePosition2D 0 0
+    size = GL.TextureSize2D (fromIntegral w) (fromIntegral h)
+    pdata = GL.PixelData GL.RGBA GL.UnsignedByte (Ptr.nullPtr :: Ptr.Ptr Word8)
 
 genRectCoords :: Coord -> Float -> Float -> [Coord]
 genRectCoords p0 width height = [p0, p1, p2, p3]
@@ -351,7 +411,8 @@ allocateRenderResource = do
     arcProgram <- allocateArcProgram
     lineProgram <- allocateLineProgram
     texturedProgram <- allocateTexturedProgram
-    return (RenderResource (RenderProgramInfos triangleProgram arcProgram lineProgram texturedProgram) Map.empty emptyPalette)
+    palette <- allocatePalette
+    return (RenderResource (RenderProgramInfos triangleProgram arcProgram lineProgram texturedProgram) Map.empty palette)
 
 allocateProgramInfo
     :: BS.ByteString
@@ -509,6 +570,18 @@ addTextureResource textureName proxy level format size boader texData rr @ (Rend
     texture <- allocateTexImage2D proxy level format size boader texData
     return $ rr { rrTextures = Map.insert textureName texture ts }
 
+allocatePixelBufferObject :: Int -> ResourceT IO GL.BufferObject
+allocatePixelBufferObject byteSize = do
+    (_, pbo) <- Resource.allocate mkPbo GL.deleteObjectName
+    return pbo
+    where
+    mkPbo = do
+        pbo <- GL.genObjectName
+        GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just pbo
+        GL.bufferData GL.PixelUnpackBuffer GL.$= (fromIntegral byteSize, (Ptr.nullPtr :: Ptr.Ptr Word8), GL.DynamicDraw)
+        GL.bindBuffer GL.PixelUnpackBuffer GL.$= Nothing
+        return pbo
+
 checkStatus
     :: (a -> GL.GettableStateVar Bool)
     -> (a -> GL.GettableStateVar String)
@@ -547,3 +620,6 @@ triangleTopLine1 = 1 `shiftL` 4
 
 triangleTopLine2 :: GL.GLuint
 triangleTopLine2 = 1 `shiftL` 5
+
+colorByteSize :: Int
+colorByteSize = sizeOf (undefined :: Color)
