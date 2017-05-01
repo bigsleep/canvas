@@ -489,11 +489,10 @@ allocateTexImage2D proxy level format size boader texData = do
     where
     mkTexture = do
         texture <- GL.genObjectName
-        liftIO $ do
-            GL.activeTexture GL.$= (GL.TextureUnit 0)
-            GL.textureBinding GL.Texture2D GL.$= Just texture
-            GL.textureFilter GL.Texture2D GL.$= ((GL.Linear', Nothing), GL.Linear')
-            GL.texImage2D GL.Texture2D proxy level format size boader texData
+        GL.activeTexture GL.$= (GL.TextureUnit 0)
+        GL.textureBinding GL.Texture2D GL.$= Just texture
+        GL.textureFilter GL.Texture2D GL.$= ((GL.Linear', Nothing), GL.Linear')
+        GL.texImage2D GL.Texture2D proxy level format size boader texData
         return texture
 
 addTextureResource
