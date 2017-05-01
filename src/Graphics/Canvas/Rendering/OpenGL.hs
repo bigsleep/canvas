@@ -70,14 +70,13 @@ data RenderInfo = RenderInfo
     , riIndex :: !GL.ArrayIndex
     , riNum :: !GL.NumArrayIndices
     , riUniformInfos :: ![UniformInfo]
-    , riTexture :: !(Maybe GL.TextureObject)
+    , riTexture :: !GL.TextureObject
     }
 
 data RenderProgramInfos = RenderProgramInfos
     { rpiTriangleProgramInfo :: !ProgramInfo
     , rpiArcProgramInfo :: !ProgramInfo
     , rpiLineProgramInfo :: !ProgramInfo
-    , rpiTexturedProgramInfo :: !ProgramInfo
     } deriving (Show)
 
 data RenderResource = RenderResource
@@ -86,85 +85,107 @@ data RenderResource = RenderResource
     , rrPalette :: !Palette
     } deriving (Show)
 
-data TexturedVertexUnit = TexturedVertexUnit
-    { tvuTextureName :: !Text
-    , tvuVertex :: ![TexturedVertex]
+data VertexGroups = VertexGroups
+    { vgTriangleVertex :: ![TriangleVertexUnit]
+    , vgArcVertex :: ![ArcVertexUnit]
+    , vgLineVertex :: ![LineVertexUnit]
     } deriving (Show)
 
-data VertexGroups = VertexGroups
-    { vgTriangleVertex :: ![TriangleVertex]
-    , vgArcVertex :: ![ArcVertex]
-    , vgLineVertex :: ![LineVertex]
-    , vgTexturedVertex :: ![TexturedVertexUnit]
-    } deriving (Show)
+type TriangleVertexUnit = (GL.TextureObject, [TriangleVertex])
+
+type ArcVertexUnit = (GL.TextureObject, [ArcVertex])
+
+type LineVertexUnit = (GL.TextureObject, [LineVertex])
 
 data Palette = Palette
     { paletteColors :: !(Set Color)
-    , paletteColorCoords :: !(Map Color (V2 Float))
+    , paletteColorCoords :: !(Map Color Coord)
     , paletteStorage :: !(Vector Color)
     , paletteTexture :: !GL.TextureObject
     , palettePixelBufferObject :: !GL.BufferObject
     } deriving (Show)
 
 instance Monoid VertexGroups where
-    mappend (VertexGroups as bs cs ds) (VertexGroups as' bs' cs' ds') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs') (ds ++ ds')
-    mempty = VertexGroups [] [] [] []
+    mappend (VertexGroups as bs cs) (VertexGroups as' bs' cs') = VertexGroups (as ++ as') (bs ++ bs') (cs ++ cs')
+    mempty = VertexGroups [] [] []
 
-convertDrawing :: Drawing -> VertexGroups
-convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
+convertDrawing :: RenderResource ->  Drawing -> VertexGroups
+convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
     where
     (lineColor, lineWidth, lineFlags) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0, 0)
         Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine1 .|. triangleBottomLine2)
+    colorCoords = paletteColorCoords . rrPalette $ resource
+    texture = paletteTexture . rrPalette $ resource
+    fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
+    lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
     vs = take 3 $ iterate rotate (p0, p1, p2)
-    format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColor lineColor lineWidth 0 lineFlags
-    vertices = map format vs
+    format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColorCoord lineColorCoord lineWidth 0 lineFlags
+    vertices = [(texture, map format vs)]
 
-convertDrawing (ShapeDrawing (ShapeStyle _ (TexturedFillStyle textureRange)) (Triangle p0 p1 p2)) = mempty { vgTexturedVertex = [vertices] }
+convertDrawing resource (ShapeDrawing (ShapeStyle _ (TexturedFillStyle textureRange)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
     where
     TextureRange textureName (V2 x0 y0) (V2 x1 y1) = textureRange
-    vertices = TexturedVertexUnit textureName [texturedVertex p0 (V2 x0 y0), texturedVertex p1 (V2 x0 y1), texturedVertex p2 (V2 x1 y0)]
+    texture = fromMaybe (GL.TextureObject 0) . Map.lookup textureName . rrTextures $ resource
+    ps = take 3 $ iterate rotate (p0, p1, p2)
+    tps = [(V2 x0 y0), (V2 x0 y1), (V2 x1 y0)]
+    format ((q0, q1, q2), tp) = triangleVertex q0 q1 q2 (V2 0 0) tp 0 0 0
+    vs = map format $ zip ps tps
+    vertices = [(texture, vs)]
 
-convertDrawing (ShapeDrawing _ (Rectangle _ width height)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
+convertDrawing _ (ShapeDrawing _ (Rectangle _ width height)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
 
-convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Rectangle p0 width height)) = mempty { vgTriangleVertex = vertices }
+convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Rectangle p0 width height)) = mempty { vgTriangleVertex = vertices }
     where
     (lineColor, lineWidth, lineFlags) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0, 0)
         Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2)
-    vertices = genRectVertices fillColor lineColor lineWidth lineWidth lineFlags lineFlags p0 width height
+    colorCoords = paletteColorCoords . rrPalette $ resource
+    texture = paletteTexture . rrPalette $ resource
+    fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
+    lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
+    vs = genRectVertices fillColorCoord lineColorCoord lineWidth lineWidth lineFlags lineFlags p0 width height
+    vertices = [(texture, vs)]
 
-convertDrawing (ShapeDrawing _ (Circle _ radius)) | radius <= 0 = mempty
+convertDrawing _ (ShapeDrawing _ (Circle _ radius)) | radius <= 0 = mempty
 
-convertDrawing (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Circle p0 radius)) = mempty { vgArcVertex = vertices }
+convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Circle p0 radius)) = mempty { vgArcVertex = vertices }
     where
     (lineColor, lineWidth) = case lineStyle of
         Nothing -> (V4 0 0 0 0, 0)
         Just (LineStyle c w) -> (c, w)
+    colorCoords = paletteColorCoords . rrPalette $ resource
+    texture = paletteTexture . rrPalette $ resource
+    fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
+    lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
     V2 x y = p0
     r' = radius * 1.16
     m = V2 (V3 r' 0 x)
            (V3 0 r' y)
     vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
-    format q = arcVertex q p0 radius fillColor lineColor lineWidth 0 (pi * 2)
+    format q = arcVertex q p0 radius fillColorCoord lineColorCoord lineWidth 0 (pi * 2)
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
-    vertices = concatMap (map format) xs
+    vertices = [(texture, concatMap (map format) xs)]
 
-convertDrawing (ShapeDrawing _ (RoundRect _ width height _)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
+convertDrawing _ (ShapeDrawing _ (RoundRect _ width height _)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
 
-convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius)) | nearZero radius = convertDrawing (ShapeDrawing shapeStyle (Rectangle p0 width height))
+convertDrawing resource (ShapeDrawing shapeStyle (RoundRect p0 width height radius)) | nearZero radius = convertDrawing resource (ShapeDrawing shapeStyle (Rectangle p0 width height))
 
-convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = mempty { vgTriangleVertex = tvs, vgArcVertex = avs }
+convertDrawing resource (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = mempty { vgTriangleVertex = [(texture, tvs)], vgArcVertex = [(texture, avs)] }
     where
     radius = radius' `min` (height * 0.5) `min` (width * 0.5)
     V2 x y = p0
     lineStyle = shapeStyleLineStyle shapeStyle
     LineStyle lineColor lineWidth = fromMaybe (LineStyle (V4 0 0 0 0) 0) lineStyle
     PlainColorFillStyle fillColor = shapeStyleFillStyle shapeStyle
+    colorCoords = paletteColorCoords . rrPalette $ resource
+    texture = paletteTexture . rrPalette $ resource
+    fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
+    lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
     rectLineFlag = if lineWidth > radius
         then triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2
         else 0
-    genRect f0 f1 lw = genRectVertices fillColor lineColor lw lw f0 f1
+    genRect f0 f1 lw = genRectVertices fillColorCoord lineColorCoord lw lw f0 f1
     tvs = genRect triangleBottomLine2 triangleTopLine2 lineWidth (V2 (x + radius) y) (width - radius * 2) radius
         ++ genRect triangleBottomLine0 triangleTopLine0 lineWidth (V2 (x + width - radius) (y + radius)) radius (height - radius * 2)
         ++ genRect triangleTopLine2 triangleBottomLine2 lineWidth (V2 (x + radius) (y + height - radius)) (width - radius * 2) radius
@@ -172,72 +193,96 @@ convertDrawing (ShapeDrawing shapeStyle (RoundRect p0 width height radius')) = m
         ++ genRect rectLineFlag rectLineFlag (max 0 (lineWidth - radius)) (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
     vs = take 4 . iterate (\(V2 vx vy) -> (V2 (-vy) vx)) $ V2 (-radius * 1.5) 0
     centers = genRectCoords (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
-    formatArcVertices q r = arcVertex r q radius fillColor lineColor lineWidth 0 (pi * 2)
+    formatArcVertices q r = arcVertex r q radius fillColorCoord lineColorCoord lineWidth 0 (pi * 2)
     avs = concatMap (\(q, v) -> map (formatArcVertices q) $ genCornerCoords q v) $ zip centers vs
     genCornerCoords q v @ (V2 vx vy) = [q, q + v, q + V2 (-vy) vx]
 
-convertDrawing (PathDrawing lineStyle (Arc p0 radius startAngle endAngle)) = mempty { vgArcVertex = vertices }
+convertDrawing resource (PathDrawing lineStyle (Arc p0 radius startAngle endAngle)) = mempty { vgArcVertex = vertices }
     where
     LineStyle lineColor lineWidth = lineStyle
-    fillColor = V4 0 0 0 0
+    colorCoords = paletteColorCoords . rrPalette $ resource
+    texture = paletteTexture . rrPalette $ resource
+    fillColorCoord = V2 0 0
+    lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
     V2 x y = p0
     r' = radius / sin (pi / 3)
     m = V2 (V3 r' 0 x)
            (V3 0 r' y)
     vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
-    format q = arcVertex q p0 radius fillColor lineColor lineWidth startAngle endAngle
+    format q = arcVertex q p0 radius fillColorCoord lineColorCoord lineWidth startAngle endAngle
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
-    vertices = concatMap (map format) xs
+    vertices = [(texture, concatMap (map format) xs)]
 
-convertDrawing (PathDrawing _ (StripPath [])) = mempty
+convertDrawing _ (PathDrawing _ (StripPath [])) = mempty
 
-convertDrawing (PathDrawing _ (StripPath [_])) = mempty
+convertDrawing _ (PathDrawing _ (StripPath [_])) = mempty
 
-convertDrawing (PathDrawing lineStyle (StripPath (p0 : p1 : ps))) = mempty { vgLineVertex = vertices }
+convertDrawing resource (PathDrawing lineStyle (StripPath (p0 : p1 : ps))) = mempty { vgLineVertex = vertices }
     where
     LineStyle lineColor lineWidth = lineStyle
+    colorCoords = paletteColorCoords . rrPalette $ resource
+    texture = paletteTexture . rrPalette $ resource
+    lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
     segs = zip (p0 : p1 : ps) (p1 : ps)
     segs' = zip3 (Nothing : map Just segs) segs (map Just (tail segs) ++ [Nothing])
     triangulate (Nothing, (q0, q1), Nothing) =
-        let a0 = lineVertex q0 q1 q0 lineWidth 4 3 lineColor
-            a1 = lineVertex q0 q1 q0 lineWidth 4 4 lineColor
-            a2 = lineVertex q1 q0 q1 lineWidth 4 3 lineColor
-            a3 = lineVertex q1 q0 q1 lineWidth 4 4 lineColor
+        let a0 = lineVertex q0 q1 q0 lineWidth 4 3 lineColorCoord
+            a1 = lineVertex q0 q1 q0 lineWidth 4 4 lineColorCoord
+            a2 = lineVertex q1 q0 q1 lineWidth 4 3 lineColorCoord
+            a3 = lineVertex q1 q0 q1 lineWidth 4 4 lineColorCoord
         in [a0, a1, a2, a2, a3, a0]
     triangulate (Nothing, (q0, q1), Just (r0, r1)) =
-        let a0 = lineVertex q0 q1 q0 lineWidth 4 3 lineColor
-            a1 = lineVertex q0 q1 q0 lineWidth 4 4 lineColor
-            a2 = lineVertex q1 q0 r1 lineWidth 4 1 lineColor
-            a3 = lineVertex q1 q0 r1 lineWidth 4 2 lineColor
-            b0 = lineVertex r0 r1 q0 lineWidth 4 1 lineColor
-            b1 = lineVertex r0 r1 q0 lineWidth 4 2 lineColor
+        let a0 = lineVertex q0 q1 q0 lineWidth 4 3 lineColorCoord
+            a1 = lineVertex q0 q1 q0 lineWidth 4 4 lineColorCoord
+            a2 = lineVertex q1 q0 r1 lineWidth 4 1 lineColorCoord
+            a3 = lineVertex q1 q0 r1 lineWidth 4 2 lineColorCoord
+            b0 = lineVertex r0 r1 q0 lineWidth 4 1 lineColorCoord
+            b1 = lineVertex r0 r1 q0 lineWidth 4 2 lineColorCoord
         in [a0, a1, a2, a2, a3, a0, a3, a2, b0, b1, b0, a2]
     triangulate (Just (s0, _), (q0, q1), Just (r0, r1)) =
-        let a0 = lineVertex q0 q1 s0 lineWidth 4 1 lineColor
-            a1 = lineVertex q0 q1 s0 lineWidth 4 2 lineColor
-            a2 = lineVertex q1 q0 r1 lineWidth 4 1 lineColor
-            a3 = lineVertex q1 q0 r1 lineWidth 4 2 lineColor
-            b0 = lineVertex r0 r1 q0 lineWidth 4 1 lineColor
-            b1 = lineVertex r0 r1 q0 lineWidth 4 2 lineColor
+        let a0 = lineVertex q0 q1 s0 lineWidth 4 1 lineColorCoord
+            a1 = lineVertex q0 q1 s0 lineWidth 4 2 lineColorCoord
+            a2 = lineVertex q1 q0 r1 lineWidth 4 1 lineColorCoord
+            a3 = lineVertex q1 q0 r1 lineWidth 4 2 lineColorCoord
+            b0 = lineVertex r0 r1 q0 lineWidth 4 1 lineColorCoord
+            b1 = lineVertex r0 r1 q0 lineWidth 4 2 lineColorCoord
         in [a0, a1, a2, a2, a3, a0, a3, a2, b0, b1, b0, a2]
     triangulate (Just (a, _), (q0, q1), Nothing) =
-        let a0 = lineVertex q0 q1 a lineWidth 4 1 lineColor
-            a1 = lineVertex q0 q1 a lineWidth 4 2 lineColor
-            a2 = lineVertex q1 q0 q1 lineWidth 4 3 lineColor
-            a3 = lineVertex q1 q0 q1 lineWidth 4 4 lineColor
+        let a0 = lineVertex q0 q1 a lineWidth 4 1 lineColorCoord
+            a1 = lineVertex q0 q1 a lineWidth 4 2 lineColorCoord
+            a2 = lineVertex q1 q0 q1 lineWidth 4 3 lineColorCoord
+            a3 = lineVertex q1 q0 q1 lineWidth 4 4 lineColorCoord
         in [a0, a1, a2, a2, a3, a0]
-    vertices = concatMap triangulate $ segs'
+    vs = concatMap triangulate $ segs'
+    vertices = [(texture, vs)]
 
 circleDivision :: Int
 circleDivision = 6
 
-circleVertices :: [V2 Float]
+circleVertices :: [Coord]
 circleVertices = vertices
     where
     division = circleDivision
     da = 2 * pi / fromIntegral division :: Float
     rmat = rotateMatrix da
     vertices = take division $ iterate (rmat !*) (V2 0 1)
+
+genRectCoords :: Coord -> Float -> Float -> [Coord]
+genRectCoords p0 width height = [p0, p1, p2, p3]
+    where
+    V2 x y = p0
+    p1 = V2 (x + width) y
+    p2 = V2 (x + width) (y + height)
+    p3 = V2 x (y + height)
+
+genRectVertices :: Coord -> Coord -> Float -> Float -> GL.GLuint -> GL.GLuint -> Coord -> Float -> Float -> [TriangleVertex]
+genRectVertices fillColor lineColor bottomLineWidth topLineWidth lineFlags0 lineFlags1 p0 width height = vertices
+    where
+    _ : p1 : p2 : p3 : _ = genRectCoords p0 width height
+    format (flag, (q0, q1, q2)) = triangleVertex q0 q1 q2 fillColor lineColor bottomLineWidth topLineWidth flag
+    gen flag = zip (repeat flag) . take 3 . iterate rotate
+    vs = gen lineFlags0 (p2, p0, p1) ++ gen lineFlags1 (p0, p2, p3)
+    vertices = map format $ vs
 
 collectColors :: [Drawing] -> Set Color
 collectColors = Set.fromList . concatMap collectColorsOne
@@ -253,7 +298,7 @@ collectColorsOne (PathDrawing lineStyle _) = [lineStyleColor lineStyle]
 paletteSize :: (Int, Int)
 paletteSize = (1024, 1024)
 
-calcPaletteCoord :: Int -> V2 Float
+calcPaletteCoord :: Int -> Coord
 calcPaletteCoord i = V2 x y
     where
     (w, h) = paletteSize
@@ -279,10 +324,10 @@ updatePalette prev nextColors = do
     prevLength = Vector.length prevStorage
     newColors = Set.difference nextColors prevColors
     nextStorage = (prevStorage Vector.++) . Vector.fromList . Set.elems $ newColors
-    nextColors = Set.union prevColors newColors
+    unionColors = Set.union prevColors newColors
     newColorCoords = Map.fromList $ zip (Set.toList newColors) (map calcPaletteCoord [prevLength..])
     nextColorCoords = Map.union prevColorCoords newColorCoords
-    nextPalette = Palette nextColors nextColorCoords nextStorage texture pbo
+    nextPalette = Palette unionColors nextColorCoords nextStorage texture pbo
 
 updatePaletteTexture :: Palette -> Vector Color -> IO ()
 updatePaletteTexture prev storage = do
@@ -310,38 +355,20 @@ updatePaletteTexture prev storage = do
     size = GL.TextureSize2D (fromIntegral w) (fromIntegral h)
     pdata = GL.PixelData GL.RGBA GL.UnsignedByte (Ptr.nullPtr :: Ptr.Ptr Word8)
 
-genRectCoords :: Coord -> Float -> Float -> [Coord]
-genRectCoords p0 width height = [p0, p1, p2, p3]
-    where
-    V2 x y = p0
-    p1 = V2 (x + width) y
-    p2 = V2 (x + width) (y + height)
-    p3 = V2 x (y + height)
-
-genRectVertices :: Color -> Color -> Float -> Float -> GL.GLuint -> GL.GLuint -> Coord -> Float -> Float -> [TriangleVertex]
-genRectVertices fillColor lineColor bottomLineWidth topLineWidth lineFlags0 lineFlags1 p0 width height = vertices
-    where
-    _ : p1 : p2 : p3 : _ = genRectCoords p0 width height
-    format (flag, (q0, q1, q2)) = triangleVertex q0 q1 q2 fillColor lineColor bottomLineWidth topLineWidth flag
-    gen flag = zip (repeat flag) . take 3 . iterate rotate
-    vs = gen lineFlags0 (p2, p0, p1) ++ gen lineFlags1 (p0, p2, p3)
-    vertices = map format $ vs
-
 allocateRenderInfo
     :: RenderResource
     -> [Uniform]
     -> [Drawing]
     -> ResourceT IO [RenderInfo]
-allocateRenderInfo resource uniforms drawings = sequence $
-    [ mkRenderInfo p1 vs1
-    , mkRenderInfo p2 vs2
-    , mkRenderInfo p3 vs3
-    ]
-    ++
-    catMaybes (map (mkRenderInfoTvu p4) tvuGroups)
+allocateRenderInfo resource uniforms drawings = do
+    rs0 <- mkRenderInfos p0 vs0
+    rs1 <- mkRenderInfos p1 vs1
+    rs2 <- mkRenderInfos p2 vs2
+    return $ concat [rs0, rs1, rs2]
     where
-    RenderResource (RenderProgramInfos p1 p2 p3 p4) ts _ = resource
-    VertexGroups vs1 vs2 vs3 vs4 = fold . map convertDrawing $ drawings
+    RenderResource (RenderProgramInfos p0 p1 p2) _ _ = resource
+    VertexGroups vs0 vs1 vs2 = fold . map (convertDrawing resource) $ drawings
+    group = List.groupBy (\(GL.TextureObject a, _) (GL.TextureObject b, _) -> a == b)
     mkBuffer bufferTarget xs = do
         let n = length xs
             size = fromIntegral $ n * sizeOf (head xs)
@@ -350,19 +377,13 @@ allocateRenderInfo resource uniforms drawings = sequence $
         withArray xs $ \ptr -> GL.bufferData bufferTarget GL.$= (size, ptr, GL.StreamDraw)
         GL.bindBuffer bufferTarget GL.$= Nothing
         return buffer
-    mkRenderInfo program vs = do
-        (_, buffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
+    mkRenderInfos program xs = do
         let ProgramInfo _ _ uniformLocations = program
             uniformInfos = zipWith UniformInfo uniformLocations uniforms
-        return $ RenderInfo program GL.Triangles buffer 0 (fromIntegral $ length vs) uniformInfos Nothing
-    tvuGroups = List.groupBy (\a b -> tvuTextureName a == tvuTextureName b) vs4
-    mkRenderInfoTvu _ [] = Nothing
-    mkRenderInfoTvu program xs @ (x : _) = Just $ do
-        let tname = tvuTextureName x
-            texture = Map.lookup tname ts
-            vs = concatMap tvuVertex xs
-            ProgramInfo _ _ uniformLocations = program
-            uniformInfos = zipWith UniformInfo uniformLocations (uniforms ++ [Uniform (GL.TextureUnit 0)])
+            gs = group xs
+            gs' = zip (map (fst . head) gs) (map (concat . map snd) gs)
+        mapM (mkRenderInfo program uniformInfos) gs'
+    mkRenderInfo program uniformInfos (texture, vs) = do
         (_, buffer) <- Resource.allocate (mkBuffer GL.ArrayBuffer vs) GL.deleteObjectName
         return $ RenderInfo program GL.Triangles buffer 0 (fromIntegral $ length vs) uniformInfos texture
 
@@ -371,12 +392,17 @@ render resource (Canvas (V2 ox oy) w h drawings) =
     Resource.runResourceT $ do
         ms <- liftIO . mapM mkMat $ [projectionMatrix, modelViewMatrix]
         let us = map Uniform ms
-        rs <- allocateRenderInfo resource us drawings
+            palette = rrPalette resource
+            colors = collectColors drawings
+        resource' <- liftIO $ do
+            palette' <- updatePalette palette colors
+            return $ resource { rrPalette = palette' }
+        rs <- allocateRenderInfo resource' us drawings
         liftIO $ do
             GL.blend GL.$= GL.Enabled
             GL.blendFunc GL.$= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
             mapM_ renderInternal rs
-        return resource
+        return resource'
     where
     projectionMatrix = ortho ox (ox + w) oy (oy + h) 1 (-1)
     modelViewMatrix = lookAt (V3 0 0 1) (V3 0 0 0) (V3 0 1 0)
@@ -389,16 +415,14 @@ renderInternal
 renderInternal info = do
     GL.currentProgram GL.$= Just program
     GL.bindBuffer GL.ArrayBuffer GL.$= Just vertexBuffer
-    when (isJust texture) $ do
-        GL.activeTexture GL.$= (GL.TextureUnit 0)
-        GL.textureBinding GL.Texture2D GL.$= texture
+    GL.activeTexture GL.$= (GL.TextureUnit 0)
+    GL.textureBinding GL.Texture2D GL.$= Just texture
     mapM_ bindAttrib attribs
     mapM_ bindUniform uniforms
     GL.drawArrays mode (fromIntegral index) (fromIntegral num)
     GL.textureBinding GL.Texture2D GL.$= Nothing
     GL.bindBuffer GL.ArrayBuffer GL.$= Nothing
-    when (isJust texture) $ do
-        GL.textureBinding GL.Texture2D GL.$= Nothing
+    GL.textureBinding GL.Texture2D GL.$= Nothing
     mapM_ unbindAttrib attribs
 
     where
@@ -410,19 +434,19 @@ allocateRenderResource = do
     triangleProgram <- allocateTriangleProgram
     arcProgram <- allocateArcProgram
     lineProgram <- allocateLineProgram
-    texturedProgram <- allocateTexturedProgram
     palette <- allocatePalette
-    return (RenderResource (RenderProgramInfos triangleProgram arcProgram lineProgram texturedProgram) Map.empty palette)
+    return (RenderResource (RenderProgramInfos triangleProgram arcProgram lineProgram) Map.empty palette)
 
 allocateProgramInfo
-    :: BS.ByteString
+    :: String
+    -> BS.ByteString
     -> BS.ByteString
     -> [VertexField]
     -> [String]
     -> ResourceT IO ProgramInfo
-allocateProgramInfo vertexShaderCode fragmentShaderCode attribParams uniformNames = do
-    vertexShader <- allocateShader GL.VertexShader vertexShaderCode
-    fragmentShader <- allocateShader GL.FragmentShader fragmentShaderCode
+allocateProgramInfo name vertexShaderCode fragmentShaderCode attribParams uniformNames = do
+    vertexShader <- allocateShader name GL.VertexShader vertexShaderCode
+    fragmentShader <- allocateShader name GL.FragmentShader fragmentShaderCode
     program <- allocateProgram [vertexShader, fragmentShader]
 
     liftIO $ do
@@ -437,6 +461,7 @@ allocateProgramInfo vertexShaderCode fragmentShaderCode attribParams uniformName
 
 allocateTriangleProgram :: ResourceT IO ProgramInfo
 allocateTriangleProgram = allocateProgramInfo
+    "triangle"
     $(embedFile "shader/triangle-vertex.glsl")
     $(embedFile "shader/triangle-fragment.glsl")
     vfs
@@ -451,6 +476,7 @@ allocateTriangleProgram = allocateProgramInfo
 
 allocateArcProgram :: ResourceT IO ProgramInfo
 allocateArcProgram = allocateProgramInfo
+    "arc"
     $(embedFile "shader/arc-vertex.glsl")
     $(embedFile "shader/arc-fragment.glsl")
     vfs
@@ -465,27 +491,15 @@ allocateArcProgram = allocateProgramInfo
 
 allocateLineProgram :: ResourceT IO ProgramInfo
 allocateLineProgram = allocateProgramInfo
+    "line"
     $(embedFile "shader/line-vertex.glsl")
     $(embedFile "shader/line-fragment.glsl")
+
     vfs
     uniformNames
 
     where
     vfs = vertexFields $ vertexSpec (Proxy :: Proxy LineVertex)
-    uniformNames =
-        [ "projectionMatrix"
-        , "modelViewMatrix"
-        ]
-
-allocateTexturedProgram :: ResourceT IO ProgramInfo
-allocateTexturedProgram = allocateProgramInfo
-    $(embedFile "shader/textured-vertex.glsl")
-    $(embedFile "shader/textured-fragment.glsl")
-    vfs
-    uniformNames
-
-    where
-    vfs = vertexFields $ vertexSpec (Proxy :: Proxy TexturedVertex)
     uniformNames =
         [ "projectionMatrix"
         , "modelViewMatrix"
@@ -508,8 +522,8 @@ bindUniform :: UniformInfo -> IO ()
 bindUniform (UniformInfo l (Uniform u)) =
     GL.uniform l GL.$= u
 
-allocateShader :: GL.ShaderType -> BS.ByteString -> ResourceT IO GL.Shader
-allocateShader shaderType src = do
+allocateShader :: String -> GL.ShaderType -> BS.ByteString -> ResourceT IO GL.Shader
+allocateShader name shaderType src = do
     (_, shader) <- Resource.allocate mkShader GL.deleteObjectName
     return shader
     where
@@ -517,7 +531,7 @@ allocateShader shaderType src = do
         shader <- GL.createShader shaderType
         GL.shaderSourceBS shader GL.$= src
         GL.compileShader shader
-        checkStatus GL.compileStatus GL.shaderInfoLog "shader compile error" shader
+        checkStatus GL.compileStatus GL.shaderInfoLog ("shader " ++ name ++ " compile error") shader
         return shader
 
 allocateProgram :: [GL.Shader] -> ResourceT IO GL.Program

@@ -3,16 +3,17 @@
 in vec2 position;
 in vec2 center;
 in float radius;
-in vec4 color;
-in vec4 lineColor;
+in vec2 color;
+in vec2 lineColor;
 in float lineWidth;
 in float startAngle;
 in float endAngle;
-varying vec2 fragPosition;
+
+out vec2 fragPosition;
 out vec2 fragCenter;
 out float fragRadius;
-out vec4 fragColor;
-out vec4 fragLineColor;
+out vec2 fragColor;
+out vec2 fragLineColor;
 out float fragLineWidth;
 out float fragStartAngle;
 out float fragEndAngle;

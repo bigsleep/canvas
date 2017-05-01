@@ -9,8 +9,6 @@ module Graphics.Canvas.Rendering.OpenGL.Vertex
     , arcVertex
     , LineVertex
     , lineVertex
-    , TexturedVertex
-    , texturedVertex
     , alignOffset
     ) where
 
@@ -26,7 +24,7 @@ import Foreign.Ptr (plusPtr, castPtr)
 import Foreign.Storable (Storable(..))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V1(..), V2(..), V3(..), V4(..))
+import Linear (V1(..), V2(..))
 
 data VertexField = VertexField
     { vfAttribLocation :: !GL.AttribLocation
@@ -96,18 +94,6 @@ instance (Storable a, HasDataType a) => IsVertexAttrib (V2 a) where
     valueDataType _ = dataType (Proxy :: Proxy a)
     numberOfValue _ = 2
     byteSize _ = sizeOf (undefined :: V2 a)
-    integerHandling' _ = integerHandling (Proxy :: Proxy a)
-
-instance (Storable a, HasDataType a) => IsVertexAttrib (V3 a) where
-    valueDataType _ = dataType (Proxy :: Proxy a)
-    numberOfValue _ = 3
-    byteSize _ = sizeOf (undefined :: V3 a)
-    integerHandling' _ = integerHandling (Proxy :: Proxy a)
-
-instance (Storable a, HasDataType a) => IsVertexAttrib (V4 a) where
-    valueDataType _ = dataType (Proxy :: Proxy a)
-    numberOfValue _ = 4
-    byteSize _ = sizeOf (undefined :: V4 a)
     integerHandling' _ = integerHandling (Proxy :: Proxy a)
 
 htraverseFor :: forall c f g h proxy xs. (Forall c xs, Applicative f) => proxy c -> (forall x. (c x) => g x -> f (h x)) -> g :* xs -> f (h :* xs)
@@ -186,8 +172,8 @@ type TriangleVertexFields =
     '[ "prevPosition" ':> V2 Float
     , "position" ':> V2 Float
     , "nextPosition" ':> V2 Float
-    , "color" ':> V4 Float
-    , "lineColor" ':> V4 Float
+    , "color" ':> V2 Float
+    , "lineColor" ':> V2 Float
     , "bottomLineWidth" ':> Float
     , "topLineWidth" ':> Float
     , "lineFlags" ':> GL.GLuint
@@ -197,7 +183,7 @@ type TriangleVertexRecord = Record TriangleVertexFields
 
 newtype TriangleVertex = TriangleVertex TriangleVertexRecord deriving (Show)
 
-triangleVertex :: V2 Float -> V2 Float -> V2 Float -> V4 Float -> V4 Float -> Float -> Float -> GL.GLuint -> TriangleVertex
+triangleVertex :: V2 Float -> V2 Float -> V2 Float -> V2 Float -> V2 Float -> Float -> Float -> GL.GLuint -> TriangleVertex
 triangleVertex prevPosition' position' nextPosition' color' lineColor' bottomLineWidth' topLineWidth' lineFlags' = TriangleVertex
     $ prevPosition @= prevPosition'
     <: position @= position'
@@ -231,8 +217,8 @@ type ArcVertexFields =
     '[ "position" ':> V2 Float
     , "center" ':> V2 Float
     , "radius" ':> Float
-    , "color" ':> V4 Float
-    , "lineColor" ':> V4 Float
+    , "color" ':> V2 Float
+    , "lineColor" ':> V2 Float
     , "lineWidth" ':> Float
     , "startAngle" ':> Float
     , "endAngle" ':> Float
@@ -242,7 +228,7 @@ type ArcVertexRecord = Record ArcVertexFields
 
 newtype ArcVertex = ArcVertex ArcVertexRecord deriving (Show)
 
-arcVertex :: V2 Float -> V2 Float -> Float -> V4 Float -> V4 Float -> Float -> Float -> Float -> ArcVertex
+arcVertex :: V2 Float -> V2 Float -> Float -> V2 Float -> V2 Float -> Float -> Float -> Float -> ArcVertex
 arcVertex position' center' radius' color' lineColor' lineWidth' startAngle' endAngle' = ArcVertex
     $ position @= position'
     <: center @= center'
@@ -280,14 +266,14 @@ type LineVertexFields =
     , "lineWidth" ':> Float
     , "miterLimit" ':> Float
     , "positionType" ':> GL.GLint
-    , "lineColor" ':> V4 Float
+    , "lineColor" ':> V2 Float
     ]
 
 type LineVertexRecord = Record LineVertexFields
 
 newtype LineVertex = LineVertex LineVertexRecord deriving (Show)
 
-lineVertex :: V2 Float -> V2 Float -> V2 Float -> Float -> Float -> GL.GLint -> V4 Float -> LineVertex
+lineVertex :: V2 Float -> V2 Float -> V2 Float -> Float -> Float -> GL.GLint -> V2 Float -> LineVertex
 lineVertex position' otherEndPosition' jointEndPosition' lineWidth' miterLimit' positionType' lineColor' = LineVertex
     $ position @= position'
     <: otherEndPosition @= otherEndPosition'

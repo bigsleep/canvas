@@ -3,13 +3,14 @@
 in vec2 prevPosition;
 in vec2 position;
 in vec2 nextPosition;
-in vec4 color;
-in vec4 lineColor;
+in vec2 color;
+in vec2 lineColor;
 in float bottomLineWidth;
 in float topLineWidth;
 in int lineFlags;
-out vec4 fragmentColor;
-out vec4 fragmentLineColor;
+
+out vec2 fragmentColor;
+out vec2 fragmentLineColor;
 flat out int fragmentLineFlags;
 out vec3 bottomLineAttrib;
 out vec3 topLineAttrib;

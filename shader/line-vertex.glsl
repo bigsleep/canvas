@@ -6,8 +6,8 @@ in vec2 jointEndPosition;
 in float lineWidth;
 in float miterLimit;
 in int positionType;
-in vec4 lineColor;
-out vec4 fragLineColor;
+in vec2 lineColor;
+out vec2 fragLineColor;
 
 uniform mat4 projectionMatrix;
 uniform mat4 modelViewMatrix;

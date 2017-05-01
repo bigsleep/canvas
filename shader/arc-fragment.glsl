@@ -1,14 +1,17 @@
 #version 130
 
-varying vec2 fragPosition;
+in vec2 fragPosition;
 in vec2 fragCenter;
 in float fragRadius;
-in vec4 fragColor;
-in vec4 fragLineColor;
+in vec2 fragColor;
+in vec2 fragLineColor;
 in float fragLineWidth;
 in float fragStartAngle;
 in float fragEndAngle;
+
 out vec4 outColor;
+
+uniform sampler2D texture;
 
 const float pi2 = 6.283185307179586;
 
@@ -27,9 +30,9 @@ void main()
         (fragStartAngle > fragEndAngle) && (angle <= fragEndAngle || fragStartAngle <= angle)) {
 
         if (distance <= innerRadius) {
-            outColor = fragColor;
+            outColor = texture2D(texture, fragColor);
         } else if (innerRadius < distance && distance <= fragRadius) {
-            outColor = fragLineColor;
+            outColor = texture2D(texture, fragLineColor);
         } else {
             discard;
         }

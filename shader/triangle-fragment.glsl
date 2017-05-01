@@ -1,11 +1,13 @@
 #version 130
 
-in vec4 fragmentColor;
-in vec4 fragmentLineColor;
+in vec2 fragmentColor;
+in vec2 fragmentLineColor;
 flat in int fragmentLineFlags;
+in vec3 bottomLineAttrib;
+in vec3 topLineAttrib;
+
 out vec4 outColor;
-varying vec3 bottomLineAttrib;
-varying vec3 topLineAttrib;
+uniform sampler2D texture;
 
 bool bottomLineEnabled(int i, int flags)
 {
@@ -19,11 +21,11 @@ bool topLineEnabled(int i, int flags)
 
 void main()
 {
-    outColor = fragmentColor;
+    outColor = texture2D(texture, fragmentColor);
 
     for (int i = 0; i < 3; ++i) {
         if ((bottomLineEnabled(i, fragmentLineFlags) && bottomLineAttrib[i] <= 1.0) || (topLineEnabled(i, fragmentLineFlags) && topLineAttrib[i] >= 1.0)) {
-            outColor = fragmentLineColor;
+            outColor = texture2D(texture, fragmentLineColor);
             break;
         }
     }
