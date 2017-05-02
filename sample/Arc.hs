@@ -16,9 +16,7 @@ main = do
     let width  = 640
         height = 480
 
-        lineColor = V4 0 0 0 1
-        fillColor = V4 0 1 0 1
-
+        lineColor = V4 0 0 0 255
         lineStyle = LineStyle lineColor 10
         startAngle = pi / 4
         endAngle = 3 * pi / 2

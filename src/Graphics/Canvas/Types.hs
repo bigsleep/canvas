@@ -13,11 +13,12 @@ module Graphics.Canvas.Types
     ) where
 
 import Data.Text (Text)
+import Data.Word (Word8)
 import Linear (V2, V3, V4(..), M22)
 
 type Coord = V2 Float
 
-type Color = V4 Float
+type Color = V4 Word8
 
 data Shape
     = Triangle !Coord !Coord !Coord

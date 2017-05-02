@@ -37,7 +37,9 @@ import Data.Text (Text)
 import Data.Vector.Storable (Vector)
 import qualified Data.Vector.Storable as Vector
 import Data.Word (Word8)
-import Foreign.Marshal.Array (withArray, copyArray)
+import Debug.Trace (trace)
+import qualified Foreign.Marshal as Ptr
+import Foreign.Marshal.Array (withArray, copyArray, peekArray)
 import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (Storable(..), sizeOf)
 import Graphics.Canvas.Types
@@ -121,7 +123,8 @@ convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle
     lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
     vs = take 3 $ iterate rotate (p0, p1, p2)
     format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColorCoord lineColorCoord lineWidth 0 lineFlags
-    vertices = [(texture, map format vs)]
+    vs' = map format vs
+    vertices = [(texture, vs')]
 
 convertDrawing resource (ShapeDrawing (ShapeStyle _ (TexturedFillStyle textureRange)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
     where
@@ -288,7 +291,7 @@ collectColors :: [Drawing] -> Set Color
 collectColors = Set.fromList . concatMap collectColorsOne
 
 collectColorsOne :: Drawing -> [Color]
-collectColorsOne (ShapeDrawing (ShapeStyle lineStyle fillStyle) _) = catMaybes $ fmap lineStyleColor lineStyle : getFillColor fillStyle : []
+collectColorsOne (ShapeDrawing (ShapeStyle lineStyle fillStyle) _) = catMaybes $ fmap (lineStyleColor) lineStyle : getFillColor fillStyle : []
     where
     getFillColor (PlainColorFillStyle fillColor) = Just fillColor
     getFillColor _ = Nothing
@@ -316,9 +319,12 @@ allocatePalette = do
     pdata = GL.PixelData GL.RGBA GL.UnsignedByte (Ptr.nullPtr :: Ptr.Ptr Word8)
 
 updatePalette :: Palette -> Set Color -> IO Palette
-updatePalette prev nextColors = do
-    updatePaletteTexture prev nextStorage
-    return nextPalette
+updatePalette prev nextColors =
+    if not (Set.null newColors)
+    then do
+        updatePaletteTexture prev nextStorage
+        return (trace (show nextPalette) nextPalette)
+    else return prev
     where
     Palette prevColors prevColorCoords prevStorage texture pbo = prev
     prevLength = Vector.length prevStorage
@@ -331,28 +337,31 @@ updatePalette prev nextColors = do
 
 updatePaletteTexture :: Palette -> Vector Color -> IO ()
 updatePaletteTexture prev storage = do
-    GL.bindBuffer GL.PixelPackBuffer GL.$= Just pbo
-    GL.withMappedBuffer GL.PixelPackBuffer GL.ReadWrite writeAddedColors onUpdateFailure
-    GL.bindBuffer GL.PixelPackBuffer GL.$= Nothing
-
     GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just pbo
-    GL.activeTexture GL.$= (GL.TextureUnit 0)
     GL.textureBinding GL.Texture2D GL.$= Just texture
+    GL.withMappedBuffer GL.PixelUnpackBuffer GL.ReadWrite writeAddedColors onUpdateFailure
+
+    GL.textureFilter GL.Texture2D GL.$= ((GL.Nearest, Nothing), GL.Nearest)
     GL.texSubImage2D GL.Texture2D 0 pos size pdata
+    GL.textureBinding GL.Texture2D GL.$= Nothing
     GL.bindBuffer GL.PixelUnpackBuffer GL.$= Nothing
     where
     Palette _ _ prevStorage texture pbo = prev
     offset = Vector.length prevStorage * colorByteSize
+    writeAddedColors :: Ptr.Ptr Color -> IO ()
     writeAddedColors ptr =
         let dest = Ptr.plusPtr ptr offset
             len = Vector.length storage
-        in Vector.unsafeWith storage $
-            \source -> copyArray dest source len
+        in do
+            Vector.unsafeWith storage $
+                \source -> copyArray dest source len
+            content <- peekArray 20 ptr
+            trace ("pbo content: " ++ show content) (putStrLn "")
     onUpdateFailure failure =
         throwIO . userError $ "mapBuffer failure: " ++ show failure
     (w, h) = paletteSize
     pos = GL.TexturePosition2D 0 0
-    size = GL.TextureSize2D (fromIntegral w) (fromIntegral h)
+    size = GL.TextureSize2D 2 1
     pdata = GL.PixelData GL.RGBA GL.UnsignedByte (Ptr.nullPtr :: Ptr.Ptr Word8)
 
 allocateRenderInfo
@@ -391,9 +400,7 @@ render :: RenderResource -> Canvas -> IO RenderResource
 render resource (Canvas (V2 ox oy) w h drawings) =
     Resource.runResourceT $ do
         ms <- liftIO . mapM mkMat $ [projectionMatrix, modelViewMatrix]
-        let us = map Uniform ms
-            palette = rrPalette resource
-            colors = collectColors drawings
+        let us = map Uniform ms ++ [Uniform (GL.TextureUnit 0)]
         resource' <- liftIO $ do
             palette' <- updatePalette palette colors
             return $ resource { rrPalette = palette' }
@@ -408,6 +415,8 @@ render resource (Canvas (V2 ox oy) w h drawings) =
     modelViewMatrix = lookAt (V3 0 0 1) (V3 0 0 0) (V3 0 1 0)
     mkMat :: M44 Float -> IO (GL.GLmatrix GL.GLfloat)
     mkMat = GL.newMatrix GL.RowMajor . concatMap toList . toList
+    palette = rrPalette resource
+    colors = collectColors drawings
 
 renderInternal
     :: RenderInfo
@@ -472,6 +481,7 @@ allocateTriangleProgram = allocateProgramInfo
     uniformNames =
         [ "projectionMatrix"
         , "modelViewMatrix"
+        , "texture"
         ]
 
 allocateArcProgram :: ResourceT IO ProgramInfo
@@ -487,6 +497,7 @@ allocateArcProgram = allocateProgramInfo
     uniformNames =
         [ "projectionMatrix"
         , "modelViewMatrix"
+        , "texture"
         ]
 
 allocateLineProgram :: ResourceT IO ProgramInfo
@@ -503,6 +514,7 @@ allocateLineProgram = allocateProgramInfo
     uniformNames =
         [ "projectionMatrix"
         , "modelViewMatrix"
+        , "texture"
         ]
 
 bindAttrib :: AttribInfo -> IO ()
@@ -592,7 +604,7 @@ allocatePixelBufferObject byteSize = do
     mkPbo = do
         pbo <- GL.genObjectName
         GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just pbo
-        GL.bufferData GL.PixelUnpackBuffer GL.$= (fromIntegral byteSize, (Ptr.nullPtr :: Ptr.Ptr Word8), GL.DynamicDraw)
+        GL.bufferData GL.PixelUnpackBuffer GL.$= (fromIntegral byteSize, (Ptr.nullPtr :: Ptr.Ptr Word8), GL.StreamDraw)
         GL.bindBuffer GL.PixelUnpackBuffer GL.$= Nothing
         return pbo
 
@@ -637,3 +649,11 @@ triangleTopLine2 = 1 `shiftL` 5
 
 colorByteSize :: Int
 colorByteSize = sizeOf (undefined :: Color)
+
+traceTexture = do
+    tptr <- Ptr.mallocBytes (1024 * 1024 * 4)
+    let pd = GL.PixelData GL.RGBA GL.UnsignedByte (tptr :: Ptr.Ptr Word8)
+    GL.getTexImage GL.Texture2D 0 pd
+    content <- peekArray 20 (Ptr.castPtr tptr :: Ptr.Ptr Color)
+    trace ("texture content:" ++ show content) (putStrLn "")
+    Ptr.free tptr

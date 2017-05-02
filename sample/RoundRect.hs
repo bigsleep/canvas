@@ -16,7 +16,7 @@ main = do
     let width  = 640
         height = 480
 
-        lineColor = V4 0 0 0 1
+        lineColor = V4 0 0 0 255
         lineStyle = LineStyle lineColor 4
         cornerRadius = 10
 
@@ -29,9 +29,8 @@ main = do
             j <- [0..(divCount - 1)]
             let x0 = fromIntegral i * dx
                 y0 = fromIntegral j * dy
-                r = 1.0
                 rectangle = RoundRect (V2 x0 y0) (0.5 * dx) (0.5 * dy) cornerRadius
-                style = ShapeStyle (Just lineStyle) (PlainColorFillStyle $ V4 r 0 0 1.0)
+                style = ShapeStyle (Just lineStyle) (PlainColorFillStyle $ V4 255 0 0 255)
             return $ ShapeDrawing style rectangle
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings

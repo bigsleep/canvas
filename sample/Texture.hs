@@ -38,11 +38,11 @@ main = do
             ptr1 <- liftIO $ Ptr.newArray (replicate 1 (V4 0 255 0 255 :: V4 Word8))
             ptr2 <- liftIO $ Ptr.newArray (replicate 1 (V4 255 0 0 255 :: V4 Word8))
             ptr3 <- liftIO $ Ptr.newArray (replicate 1 (V4 0 0 255 255 :: V4 Word8))
-            let pdata1 = GL.PixelData GL.RGBA GL.UnsignedByte (Ptr.castPtr ptr1 :: Ptr.Ptr Word8)
+            let pdata1 = GL.PixelData GL.RGBA GL.UnsignedByte ptr1
                 size1 = GL.TextureSize2D 1 1
-                pdata2 = GL.PixelData GL.RGBA GL.UnsignedByte (Ptr.castPtr ptr2 :: Ptr.Ptr Word8)
+                pdata2 = GL.PixelData GL.RGBA GL.UnsignedByte ptr2
                 size2 = GL.TextureSize2D 1 1
-                pdata3 = GL.PixelData GL.RGBA GL.UnsignedByte (Ptr.castPtr ptr3 :: Ptr.Ptr Word8)
+                pdata3 = GL.PixelData GL.RGBA GL.UnsignedByte ptr3
                 size3 = GL.TextureSize2D 1 1
             resource <- addTextureResource "t1" GL.NoProxy 0 GL.RGBA' size1 0 pdata1
                 =<< addTextureResource "t2" GL.NoProxy 0 GL.RGBA' size2 0 pdata2

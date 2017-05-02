@@ -16,9 +16,9 @@ main = do
     let width  = 640
         height = 480
 
-        lineColor = V4 0 0.7 0.6 1
+        lineColor = V4 0 178 153 255
         lineWidth = 0.8
-        fillColor = V4 0 1 0 1
+        fillColor = V4 255 0 0 255
 
         lineStyle = LineStyle lineColor lineWidth
         fillStyle = PlainColorFillStyle fillColor
@@ -33,9 +33,7 @@ main = do
             j <- [0..(divCount - 1)]
             let x0 = fromIntegral i * dx
                 y0 = fromIntegral j * dy
-                r = 1.0
                 triangle = Triangle (V2 x0 y0) (V2 (x0 + dx) y0) (V2 x0 (y0 + dy))
-                style = ShapeStyle (Just lineStyle) (PlainColorFillStyle $ V4 r 0 0 1.0)
             return $ ShapeDrawing style triangle
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings
@@ -80,14 +78,18 @@ shutdown win = do
 
 onDisplay :: (RenderResource, Canvas) -> GLFW.Window -> IO ()
 onDisplay (resource, canvas) win = do
-  GL.clearColor GL.$= GL.Color4 1 1 1 1
-  GL.clear [GL.ColorBuffer]
-  render resource canvas
-  GLFW.swapBuffers win
+    resource' <- renderDisplay resource canvas
+    GLFW.pollEvents
+    onDisplay (resource', canvas) win
 
-  forever $ do
-     GLFW.pollEvents
-     onDisplay (resource, canvas) win
+    where
+    renderDisplay r c = do
+        GL.clearColor GL.$= GL.Color4 1 1 1 1
+        GL.clear [GL.ColorBuffer]
+        r' <- render r c
+        GLFW.swapBuffers win
+        return r'
+
 
 
 resizeWindow :: GLFW.WindowSizeCallback
