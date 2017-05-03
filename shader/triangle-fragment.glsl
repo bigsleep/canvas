@@ -19,14 +19,20 @@ bool topLineEnabled(int i, int flags)
     return 0 != (flags & (1 << (i + 3)));
 }
 
+bool onLine(int i, float bottom, float top, int flag)
+{
+    return (bottomLineEnabled(i, fragmentLineFlags) && (bottom <= 1.0)) || (topLineEnabled(i, fragmentLineFlags) && (top >= 1.0));
+}
+
 void main()
 {
-    outColor = texture2D(texture, fragmentColor);
+    bool line = false;
+    vec4 color = texture2D(texture, fragmentColor);
 
-    for (int i = 0; i < 3; ++i) {
-        if ((bottomLineEnabled(i, fragmentLineFlags) && bottomLineAttrib[i] <= 1.0) || (topLineEnabled(i, fragmentLineFlags) && topLineAttrib[i] >= 1.0)) {
-            outColor = texture2D(texture, fragmentLineColor);
-            break;
-        }
+    for (int i = 0; (i < 3) && !line; ++i) {
+        line = (line || onLine(i, bottomLineAttrib[i], topLineAttrib[i], fragmentLineFlags));
+        color = line ? texture2D(texture, fragmentLineColor) : color;
     }
+
+    outColor = color;
 }

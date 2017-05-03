@@ -14,6 +14,7 @@ out vec4 outColor;
 uniform sampler2D texture;
 
 const float pi2 = 6.283185307179586;
+const vec4 empty = vec4(0.0, 0.0, 0.0, 0.0);
 
 void main()
 {
@@ -22,21 +23,20 @@ void main()
     vec2 v = fragPosition - fragCenter;
     float angle = atan(v.y, v.x);
 
-    if (angle < 0.0) {
-        angle += pi2;
-    }
+    angle = (angle < 0.0) ? angle + pi2 : angle;
 
-    if ((fragStartAngle <= fragEndAngle && fragStartAngle <= angle && angle <= fragEndAngle) ||
-        (fragStartAngle > fragEndAngle) && (angle <= fragEndAngle || fragStartAngle <= angle)) {
+    bool isAngleInRange = (fragStartAngle <= fragEndAngle && fragStartAngle <= angle && angle <= fragEndAngle) ||
+        (fragStartAngle > fragEndAngle) && (angle <= fragEndAngle || fragStartAngle <= angle);
+    bool isDistanceInRange = distance <= fragRadius;
+    bool isDistanceOnLine = innerRadius < distance;
 
-        if (distance <= innerRadius) {
-            outColor = texture2D(texture, fragColor);
-        } else if (innerRadius < distance && distance <= fragRadius) {
-            outColor = texture2D(texture, fragLineColor);
-        } else {
-            discard;
-        }
-    } else {
-        discard;
-    }
+    outColor = isAngleInRange
+        ? (isDistanceInRange
+            ? (isDistanceOnLine
+                ? outColor = texture2D(texture, fragLineColor)
+                : texture2D(texture, fragColor)
+              )
+            : empty
+          )
+        : empty;
 }
