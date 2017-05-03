@@ -1,4 +1,4 @@
-name:                canvas
+name:                canvas-sample
 version:             0.1.0.0
 synopsis:            Initial project template from stack
 description:         Please see README.md
@@ -14,107 +14,77 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 library
-  hs-source-dirs:      src
-  exposed-modules:     Graphics.Canvas
-                     , Graphics.Canvas.Types
-                     , Graphics.Canvas.Rendering.OpenGL
-                     , Graphics.Canvas.Rendering.OpenGL.Vertex
+  hs-source-dirs:      lib
+  exposed-modules:     Sample
   build-depends:       base >= 4.7 && < 5
-                     , bytestring
-                     , containers
-                     , text
-                     , linear
                      , OpenGL
-                     , file-embed
+                     , GLFW-b
+                     , canvas
                      , transformers
                      , resourcet
-                     , extensible
-                     , constraints
-                     , vector
   default-language:    Haskell2010
-  ghc-options: -O2 -Wall
 
 executable triangle-sample
-  hs-source-dirs:      sample
+  hs-source-dirs:      src
   main-is:             Triangle.hs
   build-depends:       base >= 4.7 && < 5
                      , linear
-                     , OpenGL
-                     , GLFW-b
                      , canvas
-                     , transformers
-                     , resourcet
+                     , canvas-sample
   default-language:    Haskell2010
 
 executable rectangle-sample
-  hs-source-dirs:      sample
+  hs-source-dirs:      src
   main-is:             Rectangle.hs
   build-depends:       base >= 4.7 && < 5
                      , linear
-                     , OpenGL
-                     , GLFW-b
                      , canvas
-                     , transformers
-                     , resourcet
+                     , canvas-sample
   default-language:    Haskell2010
 
 executable circle-sample
-  hs-source-dirs:      sample
+  hs-source-dirs:      src
   main-is:             Circle.hs
   build-depends:       base >= 4.7 && < 5
                      , linear
-                     , OpenGL
-                     , GLFW-b
                      , canvas
-                     , transformers
-                     , resourcet
+                     , canvas-sample
   default-language:    Haskell2010
 
 executable roundrect-sample
-  hs-source-dirs:      sample
+  hs-source-dirs:      src
   main-is:             RoundRect.hs
   build-depends:       base >= 4.7 && < 5
                      , linear
-                     , OpenGL
-                     , GLFW-b
                      , canvas
-                     , transformers
-                     , resourcet
+                     , canvas-sample
   default-language:    Haskell2010
 
 
 executable arc-sample
-  hs-source-dirs:      sample
+  hs-source-dirs:      src
   main-is:             Arc.hs
   build-depends:       base >= 4.7 && < 5
                      , linear
-                     , OpenGL
-                     , GLFW-b
                      , canvas
-                     , transformers
-                     , resourcet
+                     , canvas-sample
   default-language:    Haskell2010
 
 executable strippath-sample
-  hs-source-dirs:      sample
+  hs-source-dirs:      src
   main-is:             StripPath.hs
   build-depends:       base >= 4.7 && < 5
                      , linear
-                     , OpenGL
-                     , GLFW-b
                      , canvas
-                     , transformers
-                     , resourcet
+                     , canvas-sample
   default-language:    Haskell2010
 
 executable texture-sample
-  hs-source-dirs:      sample
+  hs-source-dirs:      src
   main-is:             Texture.hs
   build-depends:       base >= 4.7 && < 5
                      , linear
                      , OpenGL
-                     , GLFW-b
                      , canvas
-                     , transformers
-                     , resourcet
+                     , canvas-sample
   default-language:    Haskell2010

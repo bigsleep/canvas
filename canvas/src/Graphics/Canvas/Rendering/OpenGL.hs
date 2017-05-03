@@ -359,7 +359,6 @@ updatePaletteTexture prev storage = do
             trace ("pbo content: " ++ show content) (putStrLn "")
     onUpdateFailure failure =
         throwIO . userError $ "mapBuffer failure: " ++ show failure
-    (w, h) = paletteSize
     pos = GL.TexturePosition2D 0 0
     size = GL.TextureSize2D 2 1
     pdata = GL.PixelData GL.RGBA GL.UnsignedByte (Ptr.nullPtr :: Ptr.Ptr Word8)
