@@ -132,7 +132,7 @@ convertDrawing resource (ShapeDrawing (ShapeStyle _ (TexturedFillStyle textureRa
     texture = fromMaybe (GL.TextureObject 0) . Map.lookup textureName . rrTextures $ resource
     ps = take 3 $ iterate rotate (p0, p1, p2)
     tps = [(V2 x0 y0), (V2 x0 y1), (V2 x1 y0)]
-    format ((q0, q1, q2), tp) = triangleVertex q0 q1 q2 (V2 0 0) tp 0 0 0
+    format ((q0, q1, q2), tp) = triangleVertex q0 q1 q2 tp (V2 0 0) 0 0 0
     vs = map format $ zip ps tps
     vertices = [(texture, vs)]
 
