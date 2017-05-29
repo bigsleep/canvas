@@ -121,7 +121,7 @@ convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle
     texture = paletteTexture . rrPalette $ resource
     fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
     lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
-    vs = take 3 $ iterate rotate (p0, p1, p2)
+    vs = take 3 $ iterate rotate (p2, p0, p1)
     format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColorCoord lineColorCoord lineWidth 0 lineFlags
     vs' = map format vs
     vertices = [(texture, vs')]
@@ -130,8 +130,8 @@ convertDrawing resource (ShapeDrawing (ShapeStyle _ (TexturedFillStyle textureRa
     where
     TextureRange textureName (V2 x0 y0) (V2 x1 y1) = textureRange
     texture = fromMaybe (GL.TextureObject 0) . Map.lookup textureName . rrTextures $ resource
-    ps = take 3 $ iterate rotate (p0, p1, p2)
-    tps = [(V2 x0 y0), (V2 x0 y1), (V2 x1 y0)]
+    ps = take 3 $ iterate rotate (p2, p0, p1)
+    tps = [(V2 x0 y0), (V2 x1 y0), (V2 x0 y1)]
     format ((q0, q1, q2), tp) = triangleVertex q0 q1 q2 tp (V2 0 0) 0 0 0
     vs = map format $ zip ps tps
     vertices = [(texture, vs)]
