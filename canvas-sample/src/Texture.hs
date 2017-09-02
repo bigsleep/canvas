@@ -26,6 +26,18 @@ mkCircleImage size = Vector.generate (size * size) genMask
             then 255
             else 0
 
+mkColoredImage :: Int -> Vector (V4 Word8)
+mkColoredImage size = Vector.generate (size * size) gen
+    where
+    gen i =
+        let (y, x) = divMod i size
+            r = fromIntegral $ 255 * x `div` size
+            g = fromIntegral $ 255 * y `div` size
+            b = 0
+            a = 255
+        in V4 r g b a
+
+
 main :: IO ()
 main = do
     let width  = 640
@@ -33,20 +45,22 @@ main = do
         w = fromIntegral width
         h = fromIntegral height
         tsize = 1024
-        image = mkCircleImage tsize
+        image = mkColoredImage tsize
 
         shapeStyle1 = ShapeStyle Nothing $ TexturedFillStyle (TextureRange "t1" (V2 1 1) (V2 0 0))
+        shapeStyle2 = ShapeStyle Nothing $ TexturedFillStyle (TextureRange "t1" (V2 0 0) (V2 1 1))
 
         drawings =
             [ ShapeDrawing shapeStyle1 $ Triangle (V2 w h) (V2 0 h) (V2 w 0)
+            , ShapeDrawing shapeStyle2 $ Triangle (V2 0 0) (V2 w 0) (V2 0 h)
             ]
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings
         init = do
             ptr1 <- liftIO $ Vector.unsafeWith image return
-            let pdata1 = GL.PixelData GL.Luminance GL.UnsignedByte ptr1
+            let pdata1 = GL.PixelData GL.RGBA GL.UnsignedByte ptr1
                 size1 = GL.TextureSize2D (fromIntegral tsize) (fromIntegral tsize)
-            resource <- addTextureResource "t1" GL.NoProxy 0 GL.Luminance8 size1 0 pdata1
+            resource <- addTextureResource "t1" GL.NoProxy 0 GL.RGBA' size1 0 pdata1
                 =<< allocateRenderResource
             return (resource, canvas)
 
