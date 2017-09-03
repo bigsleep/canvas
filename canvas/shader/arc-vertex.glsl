@@ -4,8 +4,6 @@ in vec2 position;
 in vec2 center;
 in float radius;
 in vec2 color;
-in vec2 lineColor;
-in float lineWidth;
 in float startAngle;
 in float endAngle;
 
@@ -28,8 +26,6 @@ void main()
     fragCenter = center;
     fragRadius = radius;
     fragColor = color;
-    fragLineColor = lineColor;
-    fragLineWidth = lineWidth;
     fragStartAngle = startAngle;
     fragEndAngle = endAngle;
 }

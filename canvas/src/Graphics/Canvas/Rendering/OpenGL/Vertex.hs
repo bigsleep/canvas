@@ -166,33 +166,21 @@ instance (Storable (WrapRecord xs), Forall (KeyValue KnownSymbol IsVertexAttrib)
               return . Comp . Const' $ VertexField location name glDataType num size offset' ihandling
         r = hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol IsVertexAttrib)) f
 
-mkField "prevPosition position nextPosition color lineColor bottomLineWidth topLineWidth lineFlags lineWidth center radius startAngle endAngle otherEndPosition jointEndPosition miterLimit positionType textureCoord"
+mkField "position color center radius startAngle endAngle lineWidth lineColor otherEndPosition jointEndPosition miterLimit positionType textureCoord"
 
 type TriangleVertexFields =
-    '[ "prevPosition" ':> V2 Float
-    , "position" ':> V2 Float
-    , "nextPosition" ':> V2 Float
+    '["position" ':> V2 Float
     , "color" ':> V2 Float
-    , "lineColor" ':> V2 Float
-    , "bottomLineWidth" ':> Float
-    , "topLineWidth" ':> Float
-    , "lineFlags" ':> GL.GLuint
     ]
 
 type TriangleVertexRecord = Record TriangleVertexFields
 
 newtype TriangleVertex = TriangleVertex TriangleVertexRecord deriving (Show)
 
-triangleVertex :: V2 Float -> V2 Float -> V2 Float -> V2 Float -> V2 Float -> Float -> Float -> GL.GLuint -> TriangleVertex
-triangleVertex prevPosition' position' nextPosition' color' lineColor' bottomLineWidth' topLineWidth' lineFlags' = TriangleVertex
-    $ prevPosition @= prevPosition'
-    <: position @= position'
-    <: nextPosition @= nextPosition'
+triangleVertex :: V2 Float -> V2 Float -> TriangleVertex
+triangleVertex position' color' = TriangleVertex
+    $ position @= position'
     <: color @= color'
-    <: lineColor @= lineColor'
-    <: bottomLineWidth @= bottomLineWidth'
-    <: topLineWidth @= topLineWidth'
-    <: lineFlags @= lineFlags'
     <: Nil
 
 sizeOfTriangleVertex :: Int
@@ -218,8 +206,6 @@ type ArcVertexFields =
     , "center" ':> V2 Float
     , "radius" ':> Float
     , "color" ':> V2 Float
-    , "lineColor" ':> V2 Float
-    , "lineWidth" ':> Float
     , "startAngle" ':> Float
     , "endAngle" ':> Float
     ]
@@ -228,14 +214,12 @@ type ArcVertexRecord = Record ArcVertexFields
 
 newtype ArcVertex = ArcVertex ArcVertexRecord deriving (Show)
 
-arcVertex :: V2 Float -> V2 Float -> Float -> V2 Float -> V2 Float -> Float -> Float -> Float -> ArcVertex
-arcVertex position' center' radius' color' lineColor' lineWidth' startAngle' endAngle' = ArcVertex
+arcVertex :: V2 Float -> V2 Float -> Float -> V2 Float -> Float -> Float -> ArcVertex
+arcVertex position' center' radius' color' startAngle' endAngle' = ArcVertex
     $ position @= position'
     <: center @= center'
     <: radius @= radius'
     <: color @= color'
-    <: lineColor @= lineColor'
-    <: lineWidth @= lineWidth'
     <: startAngle @= startAngle'
     <: endAngle @= endAngle'
     <: Nil

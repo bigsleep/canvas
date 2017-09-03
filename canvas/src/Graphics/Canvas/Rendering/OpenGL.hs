@@ -114,26 +114,24 @@ instance Monoid VertexGroups where
 convertDrawing :: RenderResource ->  Drawing -> VertexGroups
 convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
     where
-    (lineColor, lineWidth, lineFlags) = case lineStyle of
-        Nothing -> (V4 0 0 0 0, 0, 0)
-        Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine1 .|. triangleBottomLine2)
+    (lineColor, lineWidth) = case lineStyle of
+        Nothing -> (V4 0 0 0 0, 0)
+        Just (LineStyle c w) -> (c, w)
     colorCoords = paletteColorCoords . rrPalette $ resource
     texture = paletteTexture . rrPalette $ resource
     fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
     lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
-    vs = take 3 $ iterate rotate (p2, p0, p1)
-    format (q0, q1, q2) = triangleVertex q0 q1 q2 fillColorCoord lineColorCoord lineWidth 0 lineFlags
-    vs' = map format vs
+    vs = [p0, p1, p2]
+    vs' = map (flip triangleVertex fillColorCoord) vs
     vertices = [(texture, vs')]
 
 convertDrawing resource (ShapeDrawing (ShapeStyle _ (TexturedFillStyle textureRange)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
     where
     TextureRange textureName (V2 x0 y0) (V2 x1 y1) = textureRange
     texture = fromMaybe (GL.TextureObject 0) . Map.lookup textureName . rrTextures $ resource
-    ps = take 3 $ iterate rotate (p2, p0, p1)
+    ps = [p0, p1, p2]
     tps = [(V2 x0 y0), (V2 x1 y0), (V2 x0 y1)]
-    format ((q0, q1, q2), tp) = triangleVertex q0 q1 q2 tp (V2 0 0) 0 0 0
-    vs = map format $ zip ps tps
+    vs = map (uncurry triangleVertex) $ zip ps tps
     vertices = [(texture, vs)]
 
 convertDrawing _ (ShapeDrawing _ (Rectangle _ width height)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
@@ -166,7 +164,7 @@ convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle
     m = V2 (V3 r' 0 x)
            (V3 0 r' y)
     vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
-    format q = arcVertex q p0 radius fillColorCoord lineColorCoord lineWidth 0 (pi * 2)
+    format q = arcVertex q p0 radius fillColorCoord 0 (pi * 2)
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = [(texture, concatMap (map format) xs)]
 
@@ -196,7 +194,7 @@ convertDrawing resource (ShapeDrawing shapeStyle (RoundRect p0 width height radi
         ++ genRect rectLineFlag rectLineFlag (max 0 (lineWidth - radius)) (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
     vs = take 4 . iterate (\(V2 vx vy) -> (V2 (-vy) vx)) $ V2 (-radius * 1.5) 0
     centers = genRectCoords (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
-    formatArcVertices q r = arcVertex r q radius fillColorCoord lineColorCoord lineWidth 0 (pi * 2)
+    formatArcVertices q r = arcVertex r q radius fillColorCoord 0 (pi * 2)
     avs = concatMap (\(q, v) -> map (formatArcVertices q) $ genCornerCoords q v) $ zip centers vs
     genCornerCoords q v @ (V2 vx vy) = [q, q + v, q + V2 (-vy) vx]
 
@@ -212,7 +210,7 @@ convertDrawing resource (PathDrawing lineStyle (Arc p0 radius startAngle endAngl
     m = V2 (V3 r' 0 x)
            (V3 0 r' y)
     vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
-    format q = arcVertex q p0 radius fillColorCoord lineColorCoord lineWidth startAngle endAngle
+    format q = arcVertex q p0 radius fillColorCoord startAngle endAngle
     xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
     vertices = [(texture, concatMap (map format) xs)]
 
@@ -282,10 +280,9 @@ genRectVertices :: Coord -> Coord -> Float -> Float -> GL.GLuint -> GL.GLuint ->
 genRectVertices fillColor lineColor bottomLineWidth topLineWidth lineFlags0 lineFlags1 p0 width height = vertices
     where
     _ : p1 : p2 : p3 : _ = genRectCoords p0 width height
-    format (flag, (q0, q1, q2)) = triangleVertex q0 q1 q2 fillColor lineColor bottomLineWidth topLineWidth flag
     gen flag = zip (repeat flag) . take 3 . iterate rotate
-    vs = gen lineFlags0 (p2, p0, p1) ++ gen lineFlags1 (p0, p2, p3)
-    vertices = map format $ vs
+    vs = [p0, p1, p2, p2, p3, p0]
+    vertices = map (flip triangleVertex fillColor) $ vs
 
 collectColors :: [Drawing] -> Set Color
 collectColors = Set.fromList . concatMap collectColorsOne
