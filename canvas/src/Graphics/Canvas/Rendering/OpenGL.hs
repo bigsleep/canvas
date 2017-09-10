@@ -46,7 +46,7 @@ import qualified Graphics.Canvas.Geometry as Geo
 import Graphics.Canvas.Types
 import Graphics.Canvas.Rendering.OpenGL.Vertex
 import qualified Graphics.Rendering.OpenGL as GL
-import Linear (V2(..), V3(..), V4(..), M22, M44, (!*), ortho, lookAt, nearZero)
+import Linear (V2(..), V3(..), V4(..), M22, M44, Additive(..), (!*), ortho, lookAt, nearZero)
 
 data Uniform = forall a. (GL.Uniform a, Show a) => Uniform !a
 deriving instance Show Uniform
@@ -128,7 +128,9 @@ convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle
         else max 0 (radius - lineWidth) / radius
     outCoords = [p0, p1, p2]
     inCoords = Geo.rescaleCoords outCoords scale center
-    vs = map (flip triangleVertex lineColorCoord) outCoords ++ map (flip triangleVertex fillColorCoord) inCoords
+    vs = if radius > lineWidth
+        then map (flip triangleVertex lineColorCoord) outCoords ++ map (flip triangleVertex fillColorCoord) inCoords
+        else map (flip triangleVertex lineColorCoord) outCoords
     vertices = [(texture, vs)]
 
 convertDrawing resource (ShapeDrawing (ShapeStyle _ (TexturedFillStyle textureRange)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
@@ -144,14 +146,21 @@ convertDrawing _ (ShapeDrawing _ (Rectangle _ width height)) | width <= 0 || hei
 
 convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle fillColor)) (Rectangle p0 width height)) = mempty { vgTriangleVertex = vertices }
     where
-    (lineColor, lineWidth, lineFlags) = case lineStyle of
-        Nothing -> (V4 0 0 0 0, 0, 0)
-        Just (LineStyle c w) -> (c, w, triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2)
+    (lineColor, lineWidth) = case lineStyle of
+        Nothing -> (V4 0 0 0 0, 0)
+        Just (LineStyle c w) -> (c, w)
+    width' = width - 2 * lineWidth
+    height' = height - 2 * lineWidth
+    p0' = p0 ^+^ V2 lineWidth lineWidth
     colorCoords = paletteColorCoords . rrPalette $ resource
     texture = paletteTexture . rrPalette $ resource
     fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
     lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
-    vs = genRectVertices fillColorCoord lineColorCoord lineWidth lineWidth lineFlags lineFlags p0 width height
+    inCoords = triangulateRect p0' width' height'
+    outCoords = triangulateRect p0 width height
+    vs = if width > 0 && height > 0
+        then map (flip triangleVertex lineColorCoord) outCoords ++ map (flip triangleVertex fillColorCoord) inCoords
+        else map (flip triangleVertex lineColorCoord) outCoords
     vertices = [(texture, vs)]
 
 convertDrawing _ (ShapeDrawing _ (Circle _ radius)) | radius <= 0 = mempty
@@ -165,14 +174,8 @@ convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle
     texture = paletteTexture . rrPalette $ resource
     fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
     lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
-    V2 x y = p0
-    r' = radius * 1.16
-    m = V2 (V3 r' 0 x)
-           (V3 0 r' y)
-    vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
-    format q = arcVertex q p0 radius fillColorCoord 0 (pi * 2)
-    xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
-    vertices = [(texture, concatMap (map format) xs)]
+    vs = circleVertices radius p0 0 (pi * 2) lineWidth fillColorCoord lineColorCoord
+    vertices = [(texture, vs)]
 
 convertDrawing _ (ShapeDrawing _ (RoundRect _ width height _)) | width <= 0 || height <= 0 || nearZero width || nearZero height = mempty
 
@@ -189,19 +192,22 @@ convertDrawing resource (ShapeDrawing shapeStyle (RoundRect p0 width height radi
     texture = paletteTexture . rrPalette $ resource
     fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
     lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
-    rectLineFlag = if lineWidth > radius
-        then triangleBottomLine0 .|. triangleBottomLine2 .|. triangleTopLine0 .|. triangleTopLine2
-        else 0
-    genRect f0 f1 lw = genRectVertices fillColorCoord lineColorCoord lw lw f0 f1
-    tvs = genRect triangleBottomLine2 triangleTopLine2 lineWidth (V2 (x + radius) y) (width - radius * 2) radius
-        ++ genRect triangleBottomLine0 triangleTopLine0 lineWidth (V2 (x + width - radius) (y + radius)) radius (height - radius * 2)
-        ++ genRect triangleTopLine2 triangleBottomLine2 lineWidth (V2 (x + radius) (y + height - radius)) (width - radius * 2) radius
-        ++ genRect triangleTopLine0 triangleBottomLine0 lineWidth (V2 x (y + radius)) radius (height - radius * 2)
-        ++ genRect rectLineFlag rectLineFlag (max 0 (lineWidth - radius)) (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
-    vs = take 4 . iterate (\(V2 vx vy) -> (V2 (-vy) vx)) $ V2 (-radius * 1.5) 0
+    outTriangleCoords = triangulateRect (V2 (x + radius) y) (width - radius * 2) height
+        ++ triangulateRect (V2 x (y + radius)) width (height - radius * 2)
+    inTriangleCoords =  triangulateRect (V2 (x + radius) (y + lineWidth)) (width - radius * 2) (height - lineWidth * 2)
+        ++ triangulateRect (V2 (x + lineWidth) (y + radius)) (width - lineWidth * 2) (height - radius * 2)
+    mkTriangleVertices color = map (flip triangleVertex color)
+    tvs = if (width > lineWidth * 2) && (height > lineWidth * 2)
+        then mkTriangleVertices lineColorCoord outTriangleCoords ++ mkTriangleVertices fillColorCoord inTriangleCoords
+        else mkTriangleVertices lineColorCoord outTriangleCoords
+    acs = take 4 . iterate (\(V2 vx vy) -> (V2 (-vy) vx)) $ V2 (-radius * 1.5) 0
     centers = genRectCoords (V2 (x + radius) (y + radius)) (width - radius * 2) (height - radius * 2)
-    formatArcVertices q r = arcVertex r q radius fillColorCoord 0 (pi * 2)
-    avs = concatMap (\(q, v) -> map (formatArcVertices q) $ genCornerCoords q v) $ zip centers vs
+    formatArcVertices color r center q = arcVertex q center r color 0 (pi * 2)
+    outArcVertices = concatMap (\(q, v) -> map (formatArcVertices lineColorCoord radius q) $ genCornerCoords q v) $ zip centers acs
+    inArcVertices = concatMap (\(q, v) -> map (formatArcVertices fillColorCoord (radius - lineWidth) q) $ genCornerCoords q v) $ zip centers acs
+    avs = if radius > lineWidth
+        then outArcVertices ++ inArcVertices
+        else outArcVertices
     genCornerCoords q v @ (V2 vx vy) = [q, q + v, q + V2 (-vy) vx]
 
 convertDrawing resource (PathDrawing lineStyle (Arc p0 radius startAngle endAngle)) = mempty { vgArcVertex = vertices }
@@ -211,14 +217,8 @@ convertDrawing resource (PathDrawing lineStyle (Arc p0 radius startAngle endAngl
     texture = paletteTexture . rrPalette $ resource
     fillColorCoord = V2 0 0
     lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
-    V2 x y = p0
-    r' = radius / sin (pi / 3)
-    m = V2 (V3 r' 0 x)
-           (V3 0 r' y)
-    vs = map (\(V2 px py) -> m !* V3 px py 1) circleVertices
-    format q = arcVertex q p0 radius fillColorCoord startAngle endAngle
-    xs = zipWith (\p1 p2 -> [p2, p0, p1]) vs (tail . cycle $ vs)
-    vertices = [(texture, concatMap (map format) xs)]
+    vs = circleVertices radius p0 startAngle endAngle lineWidth fillColorCoord lineColorCoord
+    vertices = [(texture, vs)]
 
 convertDrawing _ (PathDrawing _ (StripPath [])) = mempty
 
@@ -266,13 +266,30 @@ convertDrawing resource (PathDrawing lineStyle (StripPath (p0 : p1 : ps))) = mem
 circleDivision :: Int
 circleDivision = 6
 
-circleVertices :: [Coord]
-circleVertices = vertices
+circleCoords :: [Coord]
+circleCoords = vertices
     where
     division = circleDivision
     da = 2 * pi / fromIntegral division :: Float
     rmat = rotateMatrix da
     vertices = take division $ iterate (rmat !*) (V2 0 1)
+
+circleVertices :: Float -> Coord -> Float -> Float -> Float -> Coord -> Coord -> [ArcVertex]
+circleVertices radius p0 startAngle endAngle lineWidth fillColor lineColor = vs
+    where
+    V2 x y = p0
+    r' = radius / sin (pi / 3)
+    m = V2 (V3 r' 0 x)
+           (V3 0 r' y)
+    cs = map (\(V2 px py) -> m !* V3 px py 1) circleCoords
+    format color r q = arcVertex q p0 r color startAngle endAngle
+    scale = (radius - lineWidth) / radius
+    outCoords = concat $ zipWith (\p1 p2 -> [p2, p0, p1]) cs (tail . cycle $ cs)
+    inCoords = Geo.rescaleCoords outCoords scale p0
+    mkVertices color r = map (format color r)
+    vs = if radius > lineWidth
+        then mkVertices lineColor radius outCoords ++ mkVertices fillColor (radius - lineWidth) inCoords
+        else mkVertices lineColor radius outCoords
 
 genRectCoords :: Coord -> Float -> Float -> [Coord]
 genRectCoords p0 width height = [p0, p1, p2, p3]
@@ -282,13 +299,10 @@ genRectCoords p0 width height = [p0, p1, p2, p3]
     p2 = V2 (x + width) (y + height)
     p3 = V2 x (y + height)
 
-genRectVertices :: Coord -> Coord -> Float -> Float -> GL.GLuint -> GL.GLuint -> Coord -> Float -> Float -> [TriangleVertex]
-genRectVertices fillColor lineColor bottomLineWidth topLineWidth lineFlags0 lineFlags1 p0 width height = vertices
+triangulateRect :: Coord -> Float -> Float -> [Coord]
+triangulateRect p0 width height = [p0, p1, p2, p2, p3, p0]
     where
     _ : p1 : p2 : p3 : _ = genRectCoords p0 width height
-    gen flag = zip (repeat flag) . take 3 . iterate rotate
-    vs = [p0, p1, p2, p2, p3, p0]
-    vertices = map (flip triangleVertex fillColor) $ vs
 
 collectColors :: [Drawing] -> Set Color
 collectColors = Set.fromList . concatMap collectColorsOne

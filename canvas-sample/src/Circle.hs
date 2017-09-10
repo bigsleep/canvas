@@ -10,10 +10,10 @@ main = do
     let width  = 640
         height = 480
 
-        lineColor = V4 0 0 0 1
-        fillColor = V4 0 1 0 1
+        lineColor = V4 0 0 0 255
+        fillColor = V4 0 255 0 255
 
-        lineStyle = LineStyle lineColor 0.8
+        lineStyle = LineStyle lineColor 2.0
         fillStyle = PlainColorFillStyle fillColor
         style = (ShapeStyle (Just lineStyle) fillStyle)
 
@@ -29,7 +29,6 @@ main = do
                 y0 = fromIntegral j * dy
                 r = 1
                 circle = Circle (V2 x0 y0) radius
-                style = ShapeStyle (Just lineStyle) (PlainColorFillStyle $ V4 r 0 0 1)
             return $ ShapeDrawing style circle
 
         canvas = Canvas (V2 0 0) (fromIntegral width) (fromIntegral height) drawings
