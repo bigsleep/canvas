@@ -42,6 +42,7 @@ import qualified Foreign.Marshal as Ptr
 import Foreign.Marshal.Array (withArray, copyArray, peekArray)
 import qualified Foreign.Ptr as Ptr
 import Foreign.Storable (Storable(..), sizeOf)
+import qualified Graphics.Canvas.Geometry as Geo
 import Graphics.Canvas.Types
 import Graphics.Canvas.Rendering.OpenGL.Vertex
 import qualified Graphics.Rendering.OpenGL as GL
@@ -121,9 +122,14 @@ convertDrawing resource (ShapeDrawing (ShapeStyle lineStyle (PlainColorFillStyle
     texture = paletteTexture . rrPalette $ resource
     fillColorCoord = fromMaybe (V2 0 0) . Map.lookup fillColor $ colorCoords
     lineColorCoord = fromMaybe (V2 0 0) . Map.lookup lineColor $ colorCoords
-    vs = [p0, p1, p2]
-    vs' = map (flip triangleVertex fillColorCoord) vs
-    vertices = [(texture, vs')]
+    Geo.Circle radius center = Geo.triangleIncircle (Geo.Triangle p0 p1 p2)
+    scale = if nearZero radius
+        then 1.0
+        else max 0 (radius - lineWidth) / radius
+    outCoords = [p0, p1, p2]
+    inCoords = Geo.rescaleCoords outCoords scale center
+    vs = map (flip triangleVertex lineColorCoord) outCoords ++ map (flip triangleVertex fillColorCoord) inCoords
+    vertices = [(texture, vs)]
 
 convertDrawing resource (ShapeDrawing (ShapeStyle _ (TexturedFillStyle textureRange)) (Triangle p0 p1 p2)) = mempty { vgTriangleVertex = vertices }
     where

@@ -17,6 +17,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     Graphics.Canvas
                      , Graphics.Canvas.Types
+                     , Graphics.Canvas.Geometry
                      , Graphics.Canvas.Rendering.OpenGL
                      , Graphics.Canvas.Rendering.OpenGL.Vertex
   build-depends:       base >= 4.7 && < 5

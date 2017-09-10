@@ -11,7 +11,7 @@ main = do
         height = 480
 
         lineColor = V4 0 178 153 255
-        lineWidth = 0.8
+        lineWidth = 20
         fillColor = V4 255 0 0 255
 
         lineStyle = LineStyle lineColor lineWidth
